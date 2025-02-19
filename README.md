@@ -25,6 +25,35 @@ LOW_CONTEXT= Forces the model to use 8192 context window. Off by default.
 
 
 # What It Does
+```
+1. Generate conversations → 2. Create comparison pairs → 3. Get expert judgments → 4. Calculate final rankings
+
+1. japanese-rp-bench
+- takes a model to generate both sides of roleplay conversation
+- uses Aratako/Japanese-RP-Bench-testdata-SFW for conversation
+- Creates conversation files in conversations/ ('-' not '__' naming, sigh)
+
+2. generate_shootout_data.py
+- Creates pairwise comparisons between models
+- If targeting a specific model (--target-model):
+  - Creates pairs between target model and all other models
+- If no target specified:
+  - Creates all possible pairs between all models
+- Outputs to latest_conversation_pairs.jsonl
+- Each pair contains both conversations side by side for comparison
+
+3. conversation_comparer_any_model.py
+- Takes the conversation pairs and sends them to a judge model
+- Saves detailed analysis in analysis/ directory
+
+4. choix_analyzer.py
+- Takes all the judge evaluations
+- Uses Bradley-Terry model to create overall rankings
+- Processes all the pairwise comparisons into a final ranking
+- Outputs final scores to scores/scores.jsonl
+
+```
+
 1. Generates 30 different conversations between two characters in different role-playing sessions using the specified AI and saves them to the conversations folder. This uses TQDM but does run in parallel.
 2. Pairs them off with every other conversation in the folder and saves that to latest_conversations.jsonl.
 3. Shows those convos to the judge AI for evaluation, who rates them across a number of criteria and picks a winner. Analyses are saved to the analysis folder.
