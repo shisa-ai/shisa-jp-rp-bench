@@ -156,7 +156,7 @@ def main(target_model):
     print("Generating conversation pairs...")
     if target_model:
         # Transform the model name into the target file path
-        target_file = target_model.replace('/', '__') + '.Aratako-Japanese-RP-Bench-testdata-SFW.jsonl'
+        target_file = target_model.replace('/', '-') + '.Aratako-Japanese-RP-Bench-testdata-SFW.jsonl'
     else:
         target_file = None
     generate_conversation_pairs(target_file)
