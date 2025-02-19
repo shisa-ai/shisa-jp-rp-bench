@@ -55,8 +55,10 @@ def main(base_url, judge_model_name, test_model_name):
     # model_name = model_path
     backend = "litellm"
     backend_params = {"base_url": base_url,
-                    "max_requests_per_minute": 128,
-                    "max_tokens_per_minute": 10000000}
+        # "max_requests_per_minute": 128,
+        # "max_tokens_per_minute": 500000,
+        "max_concurrent_requests": 64,
+    }  
 
     comparer = ConversationComparer(
         model_name="hosted_vllm/"+ judge_model_name,
