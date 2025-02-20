@@ -175,9 +175,9 @@ def main(target_model, judge_model):
         print(f"{llm}: {wins} wins")
     
     # Only save files if both model names are provided
-    if model_name and judge_model:
+    if target_model and judge_model:
         # Save rankings with safe model names
-        safe_model_name = model_name.replace("/", "__")
+        safe_model_name = target_model.replace("/", "__")
         safe_judge_name = judge_model.replace("/", "__")
         
         # Save scores
