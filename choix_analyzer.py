@@ -195,7 +195,7 @@ def main(model_name, judge_model):
         if os.path.exists(analysis_file):
             new_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
             shutil.move(analysis_file, new_file)
-            print(f"Moved analysis file to: {new_file}")
+            print(f"Results saved to: {new_file}")
 
 if __name__ == "__main__":
     main()
