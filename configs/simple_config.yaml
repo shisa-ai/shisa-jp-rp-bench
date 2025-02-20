@@ -10,5 +10,6 @@ judge_inference_methods:
   - "openai_compatible_api"
 evaluation_prompt_file: "./prompts/eval_prompt_SFW.txt"
 max_turns: 10
-cache_dir: "./.cache"
-tensor_parallel_size: 2
+cache_dir: "./.cache" 
+tensor_parallel_size: 2 
+no_judge: true

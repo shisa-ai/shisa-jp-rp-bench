@@ -2,6 +2,7 @@ import choix
 import numpy as np
 from typing import List, Tuple
 import pandas as pd
+import click
 
 class LLMRanker:
     def __init__(self):
@@ -98,13 +99,9 @@ class LLMRanker:
         prob, _ = choix.probabilities((idx1, idx2), self.params)
         return prob
 
-# Example usage:
-if __name__ == "__main__":
-    import json
-    import re
-    import os
-    import glob
-
+@click.command()
+@click.option('--model-name', '-m', required=True, help='Name of the model being evaluated')
+def main(model_name):
     # Read and process all JSONL files in the analysis directory
     comparisons = []
     analysis_files = glob.glob('analysis/*.jsonl')
@@ -122,14 +119,14 @@ if __name__ == "__main__":
                     match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
                     if not match:
                         continue
-                        
+                            
                     answer_content = match.group(1)
                     # Remove anything that isn't an ASCII letter
                     cleaned_answer = ''.join(c for c in answer_content if c.isalpha())
                     
                     if not cleaned_answer:
                         continue
-                        
+                            
                     cleaned_answer = cleaned_answer.lower()
                     
                     llm1 = data['llm_a']
@@ -142,7 +139,7 @@ if __name__ == "__main__":
                     else:
                         print(f"Error: Invalid answer content in <answer> tag: {answer_content}")
                         continue
-                        
+                            
                     comparisons.append((llm1, llm2, winner))
                     
                 except json.JSONDecodeError:
@@ -155,7 +152,7 @@ if __name__ == "__main__":
     if not comparisons:
         print("No valid comparisons found in any files")
         exit(1)
-        
+            
     # Initialize and fit the model
     ranker = LLMRanker()
     ranker.fit(comparisons)
@@ -170,10 +167,20 @@ if __name__ == "__main__":
     for llm, wins in sorted(ranker.wins_count.items(), key=lambda x: x[1], reverse=True):
         print(f"{llm}: {wins} wins")
     
-    # Save rankings to scores/scores.jsonl
+    # Save rankings with safe model name
+    safe_model_name = model_name.replace("/", "__")
+    output_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
     os.makedirs('scores', exist_ok=True)
-    with open('scores/scores.jsonl', 'w') as f:
+    with open(output_file, 'w') as f:
         rankings_dict = rankings.to_dict(orient='records')
         for rank in rankings_dict:
             json.dump(rank, f)
             f.write('\n')
+    print(f"\nScores saved to: {output_file}")
+
+if __name__ == "__main__":
+    import json
+    import re
+    import os
+    import glob
+    main()

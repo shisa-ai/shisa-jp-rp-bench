@@ -28,20 +28,27 @@ class ConversationComparer(curator.LLM):
 @click.command()
 @click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
 @click.option('--judge-model-name', '-j', required=True, help='Model name to use for judging the conversations')
-@click.option('--test-model-name', '-t', required=True, help='Model name being tested/evaluated')
-def main(base_url, judge_model_name, test_model_name):
+@click.option('--test-model-name', '-t', required=False, help='Model name being tested/evaluated')
+@click.option('--generate-base-set', is_flag=True, help='Generate base set comparisons instead of testing a specific model')
+def main(base_url, judge_model_name, test_model_name, generate_base_set):
     """Compare conversations between different LLMs using a third LLM as analyzer.
 
     Reads the conversation pairs from the JSONL file, creates a dataset,
     and uses an LLM to analyze the differences. Saves the analysis results
     to a new JSONL file.
     """
+    if not test_model_name and not generate_base_set:
+        raise click.UsageError("Either --test-model-name or --generate-base-set must be specified")
+    if test_model_name and generate_base_set:
+        raise click.UsageError("Cannot specify both --test-model-name and --generate-base-set")
+
     # Create output directory if it doesn't exist
     os.makedirs("analysis", exist_ok=True)
     
-    # Read conversation pairs
+    # Read conversation pairs from appropriate file
+    input_file = "base_conversation_pairs.jsonl" if generate_base_set else "latest_conversation_pairs.jsonl"
     conversation_pairs = []
-    with open("latest_conversation_pairs.jsonl", "r", encoding="utf-8") as f:
+    with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             conversation_pairs.append(json.loads(line))
     
@@ -55,9 +62,9 @@ def main(base_url, judge_model_name, test_model_name):
     # model_name = model_path
     backend = "litellm"
     backend_params = {"base_url": base_url,
-        # "max_requests_per_minute": 128,
-        # "max_tokens_per_minute": 500000,
-        "max_concurrent_requests": 64,
+        "max_requests_per_minute": 256,
+        "max_tokens_per_minute": 500000,
+        #"max_concurrent_requests": 128,
     }  
 
     comparer = ConversationComparer(
@@ -69,9 +76,13 @@ def main(base_url, judge_model_name, test_model_name):
     results = comparer(conversations)
     
     # Save analysis results
-    safe_judge_model_name = judge_model_name.replace("/", "__")
-    safe_test_model_name = test_model_name.replace("/", "__")
-    output_path = os.path.join("analysis", f"{safe_test_model_name}.{safe_judge_model_name}.jsonl")
+    if generate_base_set:
+        safe_judge_model_name = judge_model_name.replace("/", "__")
+        output_path = os.path.join("analysis", f"base_set.{safe_judge_model_name}.jsonl")
+    else:
+        safe_test_model_name = test_model_name.replace("/", "__")
+        safe_judge_model_name = judge_model_name.replace("/", "__")
+        output_path = os.path.join("analysis", f"{safe_test_model_name}.{safe_judge_model_name}.jsonl")
     
     with open(output_path, "w", encoding="utf-8") as f:
         for item in results:

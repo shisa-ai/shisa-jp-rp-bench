@@ -406,5 +406,4 @@ def run():
     config["low_context"] = args.low_context
 
     os.makedirs("./conversations", exist_ok=True)
-    os.makedirs("./evaluations", exist_ok=True)
     run_eval(config)

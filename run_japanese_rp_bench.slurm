@@ -11,7 +11,7 @@
 # Default values
 MODEL="${MODEL:-}"  # Use empty string if MODEL is not set
 LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
-BASE_RESULTS_DIR="/fsx/ubuntu/evals/Japanese-RP-Bench/logs"
+BASE_RESULTS_DIR="${SLURM_SUBMIT_DIR}/logs"
 CONFIG_FILE="configs/config.yaml"  # Default config file location
 
 echo "Running on node: $(hostname)"
@@ -55,8 +55,8 @@ source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
 source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
 mamba activate /fsx/ubuntu/miniforge3/envs/vllm
 
-# Change to working directory
-cd /fsx/ubuntu/evals/Japanese-RP-Bench
+# Change to submission directory
+cd "${SLURM_SUBMIT_DIR}"
 
 # Calculate cluster size and parallelism
 TOTAL_GPUS=$((SLURM_NNODES * $(nvidia-smi -L | wc -l)))

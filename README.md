@@ -3,6 +3,51 @@
 ## Results save location: 
 scores/scores.jsonl
 
+## Overview
+
+This is a benchmarking tool for comparing models' roleplay (RP) ability, with judgements performed by a judge model. The system supports two modes of operation:
+
+1. Base Set Generation: Compares every conversation file against every other file in the conversations directory
+2. Single Model Comparison: Compares a single model's outputs against the pre-generated base set (default mode)
+
+
+## Generating a Base Set
+
+To generate a comprehensive base set of comparisons:
+
+1. For each model you want to include in the base comparison set, generate conversations using one of these commands:
+   ```bash
+   # For low context conversations
+   japanese-rp-bench --config ./configs/temp_config.yaml --low-context
+   
+   # For standard conversations
+   japanese-rp-bench --config ./configs/temp_config.yaml
+   ```
+
+2. After generating conversations for all models, run the following to create a base comparison file containing all possible combinations:
+   ```bash
+   python generate_shootout_data.py --generate-base
+   ```
+
+   Note: This will overwrite the existing base_conversation_pairs.jsonl file.
+
+3. Run the conversation comparer to analyze the conversations:
+   ```bash
+   python conversation_comparer_any_model.py --base-url YOUR_BASE_URL --judge-model-name YOUR_JUDGE_MODEL --generate-base-set
+   ```
+
+   This will use the specified judge model to analyze and compare the conversations in the base set.
+
+## Running Single Model Comparisons
+
+To compare a single model against the base set:
+
+```bash
+python generate_shootout_data.py --target-model model_name
+```
+
+This will create pairwise comparisons between the target model and all other models in the conversations directory.
+
 ## How To Run RP Bench
 
 ### With Default Model (Athene-v2 at its alias)
@@ -21,6 +66,7 @@ OPENAI_URL = URL used by the model. (Probably localhost:8000/v1 in most cases, I
 JUDGE_NAME = Name of the judge model.  Defaults to Athene. 
 JUDGE_URL = Judge API URL. I recommend using only Athene, as Tulu/Llama3.3 have given extremely spotty results. 
 LOW_CONTEXT= Forces the model to use 8192 context window. Off by default. 
+
 
 
 
@@ -155,7 +201,7 @@ Japanese-RP-BenchはLLMの日本語ロールプレイ能力を測定するため
 今回の例では4つのモデルの平均が最も相関係数が高かったので、こちらの評価を採用しました。
 
 |                                |   Overall |   gpt-4o-2024-08-06 |   o1-mini-2024-09-12 |   anthropic.claude-3-5-sonnet-20240620-v1:0 |   gemini-1.5-pro-002 |   gpt-4o-2024-08-06_o1-mini-2024-09-12 |   gpt-4o-2024-08-06_anthropic.claude-3-5-sonnet-20240620-v1:0 |   gpt-4o-2024-08-06_gemini-1.5-pro-002 |   o1-mini-2024-09-12_anthropic.claude-3-5-sonnet-20240620-v1:0 |   o1-mini-2024-09-12_gemini-1.5-pro-002 |   anthropic.claude-3-5-sonnet-20240620-v1:0_gemini-1.5-pro-002 |   gpt-4o-2024-08-06_o1-mini-2024-09-12_anthropic.claude-3-5-sonnet-20240620-v1:0 |   gpt-4o-2024-08-06_o1-mini-2024-09-12_gemini-1.5-pro-002 |   gpt-4o-2024-08-06_anthropic.claude-3-5-sonnet-20240620-v1:0_gemini-1.5-pro-002 |   o1-mini-2024-09-12_anthropic.claude-3-5-sonnet-20240620-v1:0_gemini-1.5-pro-002 |
-|:-------------------------------|----------:|--------------------:|---------------------:|--------------------------------------------:|---------------------:|---------------------------------------:|--------------------------------------------------------------:|---------------------------------------:|---------------------------------------------------------------:|----------------------------------------:|---------------------------------------------------------------:|---------------------------------------------------------------------------------:|----------------------------------------------------------:|---------------------------------------------------------------------------------:|----------------------------------------------------------------------------------:|
+|:------------------------------------------------|----------:|--------------------:|---------------------:|--------------------------------------------:|---------------------:|---------------------------------------:|--------------------------------------------------------------:|---------------------------------------:|---------------------------------------------------------------:|----------------------------------------:|---------------------------------------------------------------:|---------------------------------------------------------------------------------:|----------------------------------------------------------:|---------------------------------------------------------------------------------:|----------------------------------------------------------------------------------:|
 | Roleplay Adherence             |     0.632 |               0.473 |                0.46  |                                       0.29  |                0.54  |                                  0.604 |                                                         0.392 |                                  0.619 |                                                          0.479 |                                   0.63  |                                                          0.464 |                                                                            0.579 |                                                     **0.684** |                                                                            0.522 |                                                                             0.578 |
 | Consistency                    |     0.52  |               0.576 |                0.501 |                                       0.195 |                0.446 |                                  **0.641** |                                                         0.412 |                                  0.566 |                                                          0.406 |                                   0.491 |                                                          0.287 |                                                                            0.554 |                                                     0.613 |                                                                            0.435 |                                                                             0.39  |
 | Contextual Understanding       |     0.526 |               0.416 |                0.525 |                                       0.309 |                0.484 |                                  0.556 |                                                         0.393 |                                  0.498 |                                                          0.459 |                                   0.563 |                                                          0.403 |                                                                            0.507 |                                                     **0.586** |                                                                            0.45  |                                                                             0.496 |

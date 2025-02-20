@@ -96,7 +96,15 @@ def write_pair_settings(settings, file_a, file_b):
 
 def generate_conversation_pairs(target_file=None):
     conversations_dir = "conversations"
-    output_file = "latest_conversation_pairs.jsonl" if target_file else "all_conversation_pairs.jsonl"
+    output_file = "latest_conversation_pairs.jsonl" if target_file else "base_conversation_pairs.jsonl"
+    
+    # Add warning and confirmation for base_conversation_pairs.jsonl
+    if output_file == "base_conversation_pairs.jsonl":
+        print("\nWARNING: You are about to overwrite base_conversation_pairs.jsonl. These hold the pairs for all the models you'll be comparing against, and this could cause the program to stop working.")
+        confirmation = input("Are you sure you want to continue? (yes/no): ")
+        if confirmation.lower() != "yes":
+            print("Operation cancelled.")
+            return
     
     # Load the dataset for settings
     dataset = load_dataset("Aratako/Japanese-RP-Bench-testdata-SFW")
@@ -150,16 +158,18 @@ def generate_conversation_pairs(target_file=None):
     print(f"Generated pairs have been written to {output_file}")
 
 @click.command()
-@click.option('--target-model', '-m', help='Generate pairs only for this model against all others')
-def main(target_model):
+@click.option('--target-model', help='Target model to generate pairs for. If not specified, pairs will be generated between all models.')
+@click.option('--generate-base', is_flag=True, help='Generate base conversation pairs. This will overwrite base_conversation_pairs.jsonl')
+def main(target_model, generate_base):
     """Generate conversation pairs for evaluation."""
-    print("Generating conversation pairs...")
-    if target_model:
+    if generate_base:
+        generate_conversation_pairs()
+    else:
+        if not target_model:
+            raise click.UsageError("Either --target-model or --generate-base must be specified")
         # Transform the model name into the target file path
         target_file = target_model.replace('/', '-') + '_Aratako-Japanese-RP-Bench-testdata-SFW.jsonl'
-    else:
-        target_file = None
-    generate_conversation_pairs(target_file)
+        generate_conversation_pairs(target_file)
 
 if __name__ == "__main__":
     main()
