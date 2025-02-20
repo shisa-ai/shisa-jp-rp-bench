@@ -108,7 +108,7 @@ class LLMRanker:
 @click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
 
-def main(model_name, judge_model):
+def main(target_model, judge_model):
     # Read and process all JSONL files in the analysis directory
     comparisons = []
     analysis_files = glob.glob('analysis/*.jsonl')
