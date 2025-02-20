@@ -64,7 +64,7 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set):
     backend_params = {"base_url": base_url,
         "max_requests_per_minute": 256,
         "max_tokens_per_minute": 500000,
-        #"max_concurrent_requests": 128,
+        "max_concurrent_requests": 128,
     }  
 
     comparer = ConversationComparer(
