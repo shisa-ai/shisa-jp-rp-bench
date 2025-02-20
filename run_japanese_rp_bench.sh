@@ -49,7 +49,7 @@ python generate_shootout_data.py --target-model "$MODEL"
 log "Successfully generated shootout data. Evaluating results with Athene..."
 python conversation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL"
 log "Successfully evaluated results. Running Bradley-Terry comparision..."
-python choix_analyzer.py
+python choix_analyzer.py --target-model "$MODEL" --judge-model "$JUDGE_MODEL"
 log "All done! Scores saved to scores/scores.jsonl"
 
 # Clean up
