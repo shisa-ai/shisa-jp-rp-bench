@@ -105,7 +105,7 @@ class LLMRanker:
         return prob
 
 @click.command()
-@click.option('--model-name', '-m', required=False, help='Name of the model being evaluated')
+@click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
 
 def main(model_name, judge_model):
