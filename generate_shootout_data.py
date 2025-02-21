@@ -152,7 +152,7 @@ def generate_conversation_pairs(target_file=None, generate_base=False):
                 pair_data = write_pair_settings(settings, file_a, file_b)
                 # Add index to id to make it unique for each conversation pair
                 pair_data['id'] = hashlib.md5(f"{file_a}_{file_b}_{idx}".encode()).hexdigest()
-                pair_data['conversation'] = format_conversation_pair(conv_a, conv_b, settings)
+                pair_data['formatted_data'] = format_conversation_pair(conv_a, conv_b, settings)
                 out_f.write(json.dumps(pair_data, ensure_ascii=False) + '\n')
                 total_pairs += 1
     
