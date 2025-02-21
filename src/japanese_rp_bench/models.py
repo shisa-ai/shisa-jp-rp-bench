@@ -180,6 +180,7 @@ def generate_response(
     system_prompt: str,
     conversations: List[Dict[str, str]],
     low_context: bool = False,
+    ultra_low_context: bool = False,
 ) -> str:
     # OpenAIやOpenAI互換のAPIの場合
     if inference_method in ["openai_api", "openai_compatible_api"]:
@@ -198,7 +199,8 @@ def generate_response(
             result = model.chat.completions.create(
                 model=model_name,
                 messages=messages,
-                temperature=1,  # temparetureは1以外サポートされていない
+                max_tokens=128 if ultra_low_context else (256 if low_context else 1024),
+                temperature=0.7,
             )
         else:
             # o1以外のモデルの場合
@@ -207,8 +209,8 @@ def generate_response(
             result = model.chat.completions.create(
                 model=model_name,
                 messages=messages,
+                max_tokens=128 if ultra_low_context else (256 if low_context else 1024),
                 temperature=0.7,
-                max_tokens=256 if low_context else 1024,
             )
         response = result.choices[0].message.content.strip()
 

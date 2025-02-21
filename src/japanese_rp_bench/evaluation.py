@@ -5,7 +5,6 @@ from typing import Any, List, Optional
 import google.generativeai as genai
 import os
 from openai import OpenAI
-from .helpers.llmcaller.litellm_caller import LiteLLMCaller
 
 
 # 評価を実行する関数

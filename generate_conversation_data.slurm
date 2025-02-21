@@ -11,6 +11,7 @@
 # Default values
 MODEL="${MODEL:-}"  # Use empty string if MODEL is not set
 LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
+ULTRA_LOW_CONTEXT="${ULTRA_LOW_CONTEXT:-false}"  # Default to false if not set
 BASE_RESULTS_DIR="${SLURM_SUBMIT_DIR}/logs"
 CONFIG_FILE="configs/config.yaml"  # Default config file location
 
@@ -19,7 +20,7 @@ echo "Running on node: $(hostname)"
     # Validate required arguments
 if [ -z "$MODEL" ]; then
     echo "Error: MODEL environment variable is required"
-    echo "Usage: MODEL=<model_name> [LOW_CONTEXT=true] sbatch $0"
+    echo "Usage: MODEL=<model_name> [LOW_CONTEXT=true|ULTRA_LOW_CONTEXT=true] sbatch $0"
     exit 1
 fi
 
@@ -93,7 +94,9 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
     # Build vLLM command with conditional pipeline parallel flag
 # Execute the command and capture PID directly
     VLLM_CMD="vllm serve $MODEL --tensor-parallel-size $TENSOR_PARALLEL_SIZE"
-    if [ "$LOW_CONTEXT" = "true" ]; then
+    if [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
+        VLLM_CMD="$VLLM_CMD --gpu-memory-utilization 0.95 --num-scheduler-steps 20 --max-model-len 4096 --host 0.0.0.0 --port 8000 --trust-remote-code"
+    elif [ "$LOW_CONTEXT" = "true" ]; then
         VLLM_CMD="$VLLM_CMD --gpu-memory-utilization 0.95 --num-scheduler-steps 20 --max-model-len 8192 --host 0.0.0.0 --port 8000 --trust-remote-code"
     else
         VLLM_CMD="$VLLM_CMD --gpu-memory-utilization 0.95 --num-scheduler-steps 20 --max-model-len 14000 --host 0.0.0.0 --port 8000 --trust-remote-code"
@@ -149,7 +152,7 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
     log "VLLM server is ready"
     
     # Now that we're further down, activate Japanese-RP-Bench
-    mamba activate Japanese-RP-Bench
+    mamba activate shisa-rp-bench
     log "Starting eval script"
     curl http://localhost:8000/v1/models 2>&1
     export OPENAI_COMPATIBLE_API_KEY="cat" 
@@ -160,7 +163,9 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
     # Create temporary config with model name substituted
     envsubst < ./configs/simple_config.yaml > ./configs/temp_config.yaml
     
-    if [ "$LOW_CONTEXT" = "true" ]; then
+    if [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
+        japanese-rp-bench --config ./configs/temp_config.yaml --ultra-low-context
+    elif [ "$LOW_CONTEXT" = "true" ]; then
         japanese-rp-bench --config ./configs/temp_config.yaml --low-context
     else
         japanese-rp-bench --config ./configs/temp_config.yaml

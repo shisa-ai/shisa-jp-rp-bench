@@ -32,7 +32,7 @@ export JUDGE_OPENAI_COMPATIBLE_API_URL="$JUDGE_URL"
 # Initialize and activate conda/mamba
 source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
 source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
-mamba activate Japanese-RP-Bench
+mamba activate shisa-rp-bench
 
 # Create temporary config with model name substituted
 envsubst < ./configs/simple_config.yaml > ./configs/temp_config.yaml

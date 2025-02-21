@@ -18,15 +18,11 @@ classifiers = [
 ]
 keywords = ["LLM", "Roleplay", "Benchmark", "Japanese"]
 dependencies = [
-    "vllm>=0.6.1.post2",
     "openai>=1.47.0",
     "anthropic>=0.34.2",
-    "cohere>=5.9.4",
     "datasets>=3.0.0",
     "transformers>=4.44.2",
-    "accelerate>=0.34.2",
     "google-generativeai>=0.8.1",
-    "mistralai>=1.1.0",
     "choix",
     "bespokelabs-curator"
 ]

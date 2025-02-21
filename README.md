@@ -11,6 +11,29 @@ This is a benchmarking tool for comparing models' roleplay (RP) ability, with ju
 2. Single Model Comparison: Compares a single model's outputs against the pre-generated base set (default mode)
 
 
+
+## How To Run RP Bench
+
+### With Default Model (Athene-v2 at its alias)
+MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
+
+### With Specified Judge (If you don't want to use Athene-v2)
+
+MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" JUDGE_MODEL="Nexusflow/Athene-V2-Chat" JUDGE_URL="http://athenev2/v1" ./run_japanese_rp_bench.sh
+
+### With Low Context (If you need 8192 Context Length)
+LOW_CONTEXT="true" MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
+
+Breakdown:
+MODEL = Model name in standard format. 
+OPENAI_URL = URL used by the model. (Probably localhost:8000/v1 in most cases, I assume)
+JUDGE_NAME = Name of the judge model.  Defaults to Athene. 
+JUDGE_URL = Judge API URL. I recommend using only Athene, as Tulu/Llama3.3 have given extremely spotty results. 
+LOW_CONTEXT= Forces the model to use 8192 context window. Off by default. 
+
+
+
+
 ## Generating a Base Set
 
 To generate a comprehensive base set of comparisons:
@@ -47,26 +70,6 @@ python generate_shootout_data.py --target-model model_name
 ```
 
 This will create pairwise comparisons between the target model and all other models in the conversations directory.
-
-## How To Run RP Bench
-
-### With Default Model (Athene-v2 at its alias)
-MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
-
-### With Specified Judge (If you don't want to use Athene-v2)
-
-MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" JUDGE_MODEL="Nexusflow/Athene-V2-Chat" JUDGE_URL="http://athenev2/v1" ./run_japanese_rp_bench.sh
-
-### With Low Context (If you need 8192 Context Length)
-LOW_CONTEXT="true" MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
-
-Breakdown:
-MODEL = Model name in standard format. 
-OPENAI_URL = URL used by the model. (Probably localhost:8000/v1 in most cases, I assume)
-JUDGE_NAME = Name of the judge model.  Defaults to Athene. 
-JUDGE_URL = Judge API URL. I recommend using only Athene, as Tulu/Llama3.3 have given extremely spotty results. 
-LOW_CONTEXT= Forces the model to use 8192 context window. Off by default. 
-
 
 
 

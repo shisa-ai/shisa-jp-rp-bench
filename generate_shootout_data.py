@@ -94,9 +94,14 @@ def write_pair_settings(settings, file_a, file_b):
         "settings": settings
     }
 
-def generate_conversation_pairs(target_file=None):
+def generate_conversation_pairs(target_file=None, generate_base=False):
+    base_conversations_dir = "base_conversations"
     conversations_dir = "conversations"
-    output_file = "latest_conversation_pairs.jsonl" if target_file else "base_conversation_pairs.jsonl"
+    output_file = "base_conversation_pairs.jsonl" if generate_base else "latest_conversation_pairs.jsonl"
+    
+    # Number of rows to use from each conversation file and dataset
+    # Maximum is 30 as that's the total number of conversations per file
+    rows_to_use = 15
     
     # Add warning and confirmation for base_conversation_pairs.jsonl
     if output_file == "base_conversation_pairs.jsonl":
@@ -107,55 +112,51 @@ def generate_conversation_pairs(target_file=None):
             return
     
     # Load the dataset for settings
-    dataset = load_dataset("Aratako/Japanese-RP-Bench-testdata-SFW")
-    
-    # Get all JSONL files
-    jsonl_files = [f for f in os.listdir(conversations_dir) if f.endswith('.jsonl')]
-    
+    dataset = load_dataset("Aratako/Japanese-RP-Bench-testdata-SFW")["train"]
+    #Take the specified number of rows
+    dataset = dataset.select(range(rows_to_use))
+
     if target_file:
-        if target_file not in jsonl_files:
+        # Check if target file exists in conversations directory
+        if not os.path.exists(os.path.join(conversations_dir, target_file)):
             raise click.BadParameter(f"File {target_file} not found in {conversations_dir}")
-        # Generate pairs only for the target file
-        other_files = [f for f in jsonl_files if f != target_file]
-        pairs = [(target_file, other_file) for other_file in other_files]
+        # Get all files from base_conversations to compare against
+        base_files = [f for f in os.listdir(base_conversations_dir) if f.endswith('.jsonl')]
+        pairs = [(target_file, base_file) for base_file in base_files]
+        print(f"Comparing {target_file} against {len(base_files)} files from {base_conversations_dir}")
     else:
-        # Generate all possible pairs using combinations
+        # Determine which directory to use and get JSONL files
+        working_dir = base_conversations_dir if generate_base else conversations_dir
+        jsonl_files = [f for f in os.listdir(working_dir) if f.endswith('.jsonl')]
         pairs = list(combinations(jsonl_files, 2))
     
-    print(f"Found {len(jsonl_files)} files, generating {len(pairs)} pairs...")
-    
+    # Process pairs and write to output
+    total_pairs = 0
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
-            path_a = os.path.join(conversations_dir, file_a)
-            path_b = os.path.join(conversations_dir, file_b)
+            if target_file:
+                # Load target file from conversations and comparison file from base_conversations
+                convs_a = load_jsonl(os.path.join(conversations_dir, file_a))[:rows_to_use]
+                convs_b = load_jsonl(os.path.join(base_conversations_dir, file_b))[:rows_to_use]
+            else:
+                # Load both files from the same working directory
+                convs_a = load_jsonl(os.path.join(working_dir, file_a))[:rows_to_use]
+                convs_b = load_jsonl(os.path.join(working_dir, file_b))[:rows_to_use]
             
-            data_a = load_jsonl(path_a)
-            data_b = load_jsonl(path_b)
-            
-            # For each conversation in the files
-            for i, (conv_a, conv_b) in enumerate(zip(data_a, data_b)):
-                # Get corresponding dataset row
-                dataset_row = dataset['train'][i]
+            # Generate pairs for each conversation in the files
+            for idx, (conv_a, conv_b) in enumerate(zip(convs_a, convs_b)):
+                # Get settings from dataset - use idx since we're going through conversations in order
+                settings = dataset[idx]
                 
-                # Create settings with unique ID and model names
-                settings = write_pair_settings(conv_a.get("settings", {}), file_a, file_b)
-                
-                # Format both conversations into a single markdown document
-                formatted_data = format_conversation_pair(conv_a, conv_b, dataset_row)
-                
-                # Combine into final format
-                comparison_data = {
-                    "id": settings["id"],
-                    "llm_a": settings["llm_a"],
-                    "llm_b": settings["llm_b"],
-                    "settings": settings["settings"],
-                    "formatted_data": formatted_data
-                }
-                
-                # Write to output file
-                out_f.write(json.dumps(comparison_data, ensure_ascii=False) + '\n')
-                
-    print(f"Generated pairs have been written to {output_file}")
+                # Format and write the pair
+                pair_data = write_pair_settings(settings, file_a, file_b)
+                # Add index to id to make it unique for each conversation pair
+                pair_data['id'] = hashlib.md5(f"{file_a}_{file_b}_{idx}".encode()).hexdigest()
+                pair_data['conversation'] = format_conversation_pair(conv_a, conv_b, settings)
+                out_f.write(json.dumps(pair_data, ensure_ascii=False) + '\n')
+                total_pairs += 1
+    
+    print(f"Generated {total_pairs} total pairs written to {output_file}")
 
 @click.command()
 @click.option('--target-model', help='Target model to generate pairs for. If not specified, pairs will be generated between all models.')
@@ -163,7 +164,7 @@ def generate_conversation_pairs(target_file=None):
 def main(target_model, generate_base):
     """Generate conversation pairs for evaluation."""
     if generate_base:
-        generate_conversation_pairs()
+        generate_conversation_pairs(generate_base=True)
     else:
         if not target_model:
             raise click.UsageError("Either --target-model or --generate-base must be specified")

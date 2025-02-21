@@ -16,6 +16,7 @@ class LLMRanker:
         self.n_items = 0
         self.params = None
         self.wins_count = {}  # Track raw number of wins for each LLM
+        self.total_matches = {}  # Track total number of matches for each LLM
 
     def process_comparisons(self, comparisons: List[Tuple[str, str, str]]):
         """
@@ -37,14 +38,17 @@ class LLMRanker:
         
         # Initialize wins count for each LLM
         self.wins_count = {llm: 0 for llm in unique_llms}
+        self.total_matches = {llm: 0 for llm in unique_llms}
         
         # Convert comparisons to format needed by choix
         processed_comparisons = []
         for llm1, llm2, winner in comparisons:
             idx1 = self.llm_to_idx[llm1]
             idx2 = self.llm_to_idx[llm2]
-            # Track wins
+            # Track wins and matches
             self.wins_count[winner] += 1
+            self.total_matches[llm1] += 1
+            self.total_matches[llm2] += 1
             if winner == llm1:
                 processed_comparisons.append((idx1, idx2))
             else:
@@ -87,6 +91,7 @@ class LLMRanker:
             'llm': [self.idx_to_llm[i] for i in range(self.n_items)],
             'score': self.params,
             'wins': [self.wins_count[self.idx_to_llm[i]] for i in range(self.n_items)],
+            'total_matches': [self.total_matches[self.idx_to_llm[i]] for i in range(self.n_items)],
             'EN': en_scores_0_10,
             'LT': lt_scores_0_10,
         })
