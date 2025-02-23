@@ -12,7 +12,7 @@ if [ -z "$MODEL" ] || [ -z "$OPENAI_URL" ]; then
     echo "Error: Required environment variables are missing"
     echo "Usage: MODEL=<model_name> OPENAI_URL=<api_url> [JUDGE_URL=<judge_url>] [LOW_CONTEXT=true] [JUDGE_MODEL=model_name] ./$0"
     echo "Example:"
-    echo "  MODEL=mistral OPENAI_URL=http://localhost:8000/v1 ./$0"
+    echo "  MODEL=mistral OPENAI_URL=http://localhost:8000/v1 $0"
     exit 1
 fi
 
@@ -32,7 +32,7 @@ export JUDGE_OPENAI_COMPATIBLE_API_URL="$JUDGE_URL"
 # Initialize and activate conda/mamba
 source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
 source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
-mamba activate shisa-rp-bench
+mamba activate shisa-jp-rp-bench
 
 # Create temporary config with model name substituted
 envsubst < ./configs/simple_config.yaml > ./configs/temp_config.yaml
