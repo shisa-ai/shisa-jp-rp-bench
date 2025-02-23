@@ -62,8 +62,8 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set):
     # model_name = model_path
     backend = "litellm"
     backend_params = {"base_url": base_url,
-        "max_requests_per_minute": 1000,
-        "max_tokens_per_minute": 1500000,
+        "max_requests_per_minute": 5000,
+        "max_tokens_per_minute": 1000000,
         "max_concurrent_requests": 128,
     }  
 
