@@ -114,52 +114,66 @@ class LLMRanker:
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
 
 def main(target_model, judge_model):
-    # Read and process all JSONL files in the analysis directory
+    # Determine which analysis file to process
     comparisons = []
-    analysis_files = glob.glob('analysis/*.jsonl')
+    if target_model and judge_model:
+        # For evaluating a specific model
+        safe_model_name = target_model.replace("/", "__")
+        safe_judge_name = judge_model.replace("/", "__")
+        file_path = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
+    else:
+        # For base set comparison
+        base_files = [f for f in glob.glob('analysis/base_set.*.jsonl')]
+        if not base_files:
+            print("No base set analysis files found")
+            exit(1)
+        file_path = base_files[0]  # Use the first base set file found
     
-    for file_path in analysis_files:
-        print(f"\nProcessing {file_path}...")
-        with open(file_path, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    if 'llm_a' not in data or 'llm_b' not in data or 'analysis' not in data:
-                        continue
-                    
-                    # Extract the winner from analysis field
-                    match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
-                    if not match:
-                        continue
-                            
-                    answer_content = match.group(1)
-                    # Remove anything that isn't an ASCII letter
-                    cleaned_answer = ''.join(c for c in answer_content if c.isalpha())
-                    
-                    if not cleaned_answer:
-                        continue
-                            
-                    cleaned_answer = cleaned_answer.lower()
-                    
-                    llm1 = data['llm_a']
-                    llm2 = data['llm_b']
-                    
-                    if cleaned_answer == 'a':
-                        winner = llm1
-                    elif cleaned_answer == 'b':
-                        winner = llm2
-                    else:
-                        print(f"Error: Invalid answer content in <answer> tag: {answer_content}")
-                        continue
-                            
-                    comparisons.append((llm1, llm2, winner))
-                    
-                except json.JSONDecodeError:
-                    print("Error: Invalid JSON line encountered")
+    if not os.path.exists(file_path):
+        print(f"Analysis file not found: {file_path}")
+        exit(1)
+    
+    print(f"\nProcessing {file_path}...")
+    with open(file_path, 'r') as f:
+        for line in f:
+            try:
+                data = json.loads(line)
+                if 'llm_a' not in data or 'llm_b' not in data or 'analysis' not in data:
                     continue
-                except Exception as e:
-                    print(f"Error processing line: {str(e)}")
+                
+                # Extract the winner from analysis field
+                match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
+                if not match:
                     continue
+                        
+                answer_content = match.group(1)
+                # Remove anything that isn't an ASCII letter
+                cleaned_answer = ''.join(c for c in answer_content if c.isalpha())
+                
+                if not cleaned_answer:
+                    continue
+                        
+                cleaned_answer = cleaned_answer.lower()
+                
+                llm1 = data['llm_a']
+                llm2 = data['llm_b']
+                
+                if cleaned_answer == 'a':
+                    winner = llm1
+                elif cleaned_answer == 'b':
+                    winner = llm2
+                else:
+                    print(f"Error: Invalid answer content in <answer> tag: {answer_content}")
+                    continue
+                        
+                comparisons.append((llm1, llm2, winner))
+                
+            except json.JSONDecodeError:
+                print("Error: Invalid JSON line encountered")
+                continue
+            except Exception as e:
+                print(f"Error processing line: {str(e)}")
+                continue
     
     if not comparisons:
         print("No valid comparisons found in any files")
