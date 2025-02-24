@@ -175,6 +175,9 @@ def main(target_model, judge_model):
 def load_comparisons_from_file(file_path):
     """Helper function to load comparisons from a file."""
     comparisons = []
+    # Check if this is a base set file
+    is_base_file = 'base_set.' in file_path
+    
     with open(file_path, 'r') as f:
         for line in f:
             try:
@@ -196,8 +199,19 @@ def load_comparisons_from_file(file_path):
                         
                 cleaned_answer = cleaned_answer.lower()
                 
-                llm1 = data['llm_a']
-                llm2 = data['llm_b']
+                '''
+                In order to have proper handling of models that appear in the base set, we prefix base set models with a 'base__'
+
+                The base model is always llm2 for our target model comparison file so we have to prefix 'base__' as well there
+                '''
+                # Add prefix to model names if from base set
+                if is_base_file:
+                    llm1 = f"base__{data['llm_a']}"
+                    llm2 = f"base__{data['llm_b']}"
+                else:
+                    llm1 = data['llm_a']
+                    llm2 = f"base__{data['llm_b']}"
+
                 
                 if cleaned_answer == 'a':
                     winner = llm1
