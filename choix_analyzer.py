@@ -114,26 +114,67 @@ class LLMRanker:
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
 
 def main(target_model, judge_model):
-    # Determine which analysis file to process
+    # Always load base set comparisons first
     comparisons = []
+    base_files = [f for f in glob.glob('analysis/base_set.*.jsonl')]
+    if base_files:
+        print("\nProcessing base set comparisons...")
+        for base_file in base_files:
+            comparisons.extend(load_comparisons_from_file(base_file))
+    
+    # If target model and judge model are specified, load those comparisons too
     if target_model and judge_model:
-        # For evaluating a specific model
         safe_model_name = target_model.replace("/", "__")
         safe_judge_name = judge_model.replace("/", "__")
         file_path = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
-    else:
-        # For base set comparison
-        base_files = [f for f in glob.glob('analysis/base_set.*.jsonl')]
-        if not base_files:
-            print("No base set analysis files found")
-            exit(1)
-        file_path = base_files[0]  # Use the first base set file found
+        
+        if os.path.exists(file_path):
+            print(f"\nProcessing {file_path}...")
+            comparisons.extend(load_comparisons_from_file(file_path))
+        else:
+            print(f"Analysis file not found: {file_path}")
+            if not comparisons:  # If we don't even have base comparisons
+                exit(1)
     
-    if not os.path.exists(file_path):
-        print(f"Analysis file not found: {file_path}")
+    if not comparisons:
+        print("No valid comparisons found in any files")
         exit(1)
+            
+    # Initialize and fit the model
+    ranker = LLMRanker()
+    ranker.fit(comparisons)
     
-    print(f"\nProcessing {file_path}...")
+    # Get rankings
+    rankings = ranker.get_rankings()
+    print("\nRankings:")
+    print(rankings)
+    
+    # Print win counts
+    print("\nRaw win counts:")
+    for llm, wins in sorted(ranker.wins_count.items(), key=lambda x: x[1], reverse=True):
+        print(f"{llm}: {wins} wins")
+    
+    # Only save files if both model names are provided
+    if target_model and judge_model:
+        # Save rankings with safe model names
+        safe_model_name = target_model.replace("/", "__")
+        
+        # Create scores directory if it doesn't exist
+        os.makedirs('scores', exist_ok=True)
+        
+        # Save scores
+        scores_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
+        rankings.to_json(scores_file, orient='records', lines=True)
+        print(f"\nScores saved to: {scores_file}")
+        
+        # Save raw answers for analysis
+        answers_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
+        shutil.copy(file_path, answers_file)
+        print(f"Results saved to: {answers_file}")
+
+def load_comparisons_from_file(file_path):
+    """Helper function to load comparisons from a file."""
+    comparisons = []
     with open(file_path, 'r') as f:
         for line in f:
             try:
@@ -174,47 +215,7 @@ def main(target_model, judge_model):
             except Exception as e:
                 print(f"Error processing line: {str(e)}")
                 continue
-    
-    if not comparisons:
-        print("No valid comparisons found in any files")
-        exit(1)
-            
-    # Initialize and fit the model
-    ranker = LLMRanker()
-    ranker.fit(comparisons)
-    
-    # Get rankings
-    rankings = ranker.get_rankings()
-    print("\nRankings:")
-    print(rankings)
-    
-    # Print win counts
-    print("\nRaw win counts:")
-    for llm, wins in sorted(ranker.wins_count.items(), key=lambda x: x[1], reverse=True):
-        print(f"{llm}: {wins} wins")
-    
-    # Only save files if both model names are provided
-    if target_model and judge_model:
-        # Save rankings with safe model names
-        safe_model_name = target_model.replace("/", "__")
-        safe_judge_name = judge_model.replace("/", "__")
-        
-        # Save scores
-        output_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
-        os.makedirs('scores', exist_ok=True)
-        with open(output_file, 'w') as f:
-            rankings_dict = rankings.to_dict(orient='records')
-            for rank in rankings_dict:
-                json.dump(rank, f)
-                f.write('\n')
-        print(f"\nScores saved to: {output_file}")
-        
-        # Move and rename analysis file
-        analysis_file = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
-        if os.path.exists(analysis_file):
-            new_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
-            shutil.move(analysis_file, new_file)
-            print(f"Results saved to: {new_file}")
+    return comparisons
 
 if __name__ == "__main__":
     main()
