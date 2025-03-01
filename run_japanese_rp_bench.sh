@@ -4,6 +4,7 @@
 MODEL="${MODEL:-}"  # Use empty string if MODEL is not set
 LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
 OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
+OPENAI_COMPATIBLE_API_KEY="${OPENAI_COMPATIBLE_API_KEY:-x}"  # API Key for the model
 JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
 JUDGE_MODEL="${JUDGE_MODEL:-Nexusflow/Athene-V2-Chat}"  # Default judge model
 
@@ -24,9 +25,10 @@ log() {
 log "Starting eval script."
 log "Generating conversation data..."
 # Set environment variables for API endpoints
-export OPENAI_COMPATIBLE_API_KEY="cat"
+# We pass this in...
+# export OPENAI_COMPATIBLE_API_KEY="x" 
 export OPENAI_COMPATIBLE_API_URL="$OPENAI_URL"
-export JUDGE_OPENAI_COMPATIBLE_API_KEY="cat"
+export JUDGE_OPENAI_COMPATIBLE_API_KEY="x"
 export JUDGE_OPENAI_COMPATIBLE_API_URL="$JUDGE_URL"
 
 # Initialize and activate conda/mamba
