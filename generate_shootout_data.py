@@ -94,10 +94,16 @@ def write_pair_settings(settings, file_a, file_b):
         "settings": settings
     }
 
-def generate_conversation_pairs(target_file=None, generate_base=False):
+def generate_conversation_pairs(target_file=None, generate_base=False, temp_dir=None):
     base_conversations_dir = "base_conversations"
     conversations_dir = "conversations"
-    output_file = "base_conversation_pairs.jsonl" if generate_base else "latest_conversation_pairs.jsonl"
+    if generate_base:
+        output_file = "base_conversation_pairs.jsonl"
+    else:
+        if temp_dir:
+            output_file = os.path.join(temp_dir, "latest_conversation_pairs.jsonl")
+        else:
+         output_file = "latest_conversation_pairs.jsonl"
     
     # Number of rows to use from each conversation file and dataset
     # Maximum is 30 as that's the total number of conversations per file
@@ -161,7 +167,8 @@ def generate_conversation_pairs(target_file=None, generate_base=False):
 @click.command()
 @click.option('--target-model', help='Target model to generate pairs for. If not specified, pairs will be generated between all models.')
 @click.option('--generate-base', is_flag=True, help='Generate base conversation pairs. This will overwrite base_conversation_pairs.jsonl')
-def main(target_model, generate_base):
+@click.option('--temp-dir', help='Temporary directory for job-specific files')
+def main(target_model, generate_base, temp_dir):
     """Generate conversation pairs for evaluation."""
     if generate_base:
         generate_conversation_pairs(generate_base=True)
@@ -170,7 +177,7 @@ def main(target_model, generate_base):
             raise click.UsageError("Either --target-model or --generate-base must be specified")
         # Transform the model name into the target file path
         target_file = target_model.replace('/', '-') + '_Aratako-Japanese-RP-Bench-testdata-SFW.jsonl'
-        generate_conversation_pairs(target_file)
+        generate_conversation_pairs(target_file, temp_dir=temp_dir)
 
 if __name__ == "__main__":
     main()

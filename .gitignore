@@ -10,6 +10,7 @@ scores/
 conversations/
 base_conversation_pairs.jsonl
 latest_conversation_pairs.jsonl
+tmp*
 
 # C extensions
 *.so

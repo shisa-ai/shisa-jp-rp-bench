@@ -112,11 +112,23 @@ class LLMRanker:
 @click.command()
 @click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
+@click.option('--temp-dir', help='Temporary directory for job-specific files')
+def main(target_model, judge_model, temp_dir):
+    # Set up job-specific directories
+    analysis_dir = os.path.join(temp_dir, "analysis") if temp_dir else "analysis"
+    temp_scores_dir = os.path.join(temp_dir, "scores") if temp_dir else "scores"
 
-def main(target_model, judge_model):
+    # Always create the global scores directory as well for final output
+    global_scores_dir = "scores"  # This is the directory your caller expects
+    os.makedirs(global_scores_dir, exist_ok=True)
+    # Create temp scores directory if needed
+    if temp_dir:
+        os.makedirs(temp_scores_dir, exist_ok=True)
+    
     # Always load base set comparisons first
     comparisons = []
-    base_files = [f for f in glob.glob('analysis/base_set.*.jsonl')]
+    # Update file paths to use job-specific directories
+    base_files = [f for f in glob.glob(os.path.join(analysis_dir, 'base_set.*.jsonl'))]
     if base_files:
         print("\nProcessing base set comparisons...")
         for base_file in base_files:
@@ -126,7 +138,7 @@ def main(target_model, judge_model):
     if target_model and judge_model:
         safe_model_name = target_model.replace("/", "__")
         safe_judge_name = judge_model.replace("/", "__")
-        file_path = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
+        file_path = os.path.join(analysis_dir, f'{safe_model_name}.{safe_judge_name}.jsonl')
         
         if os.path.exists(file_path):
             print(f"\nProcessing {file_path}...")
@@ -158,19 +170,19 @@ def main(target_model, judge_model):
     if target_model and judge_model:
         # Save rankings with safe model names
         safe_model_name = target_model.replace("/", "__")
+
+        # Save score to temp and global locations
+        temp_scores_file = os.path.join(temp_scores_dir, f'{safe_model_name}_rp_bench_scores.jsonl')
+        rankings.to_json(temp_scores_file, orient='records', lines=True)
         
-        # Create scores directory if it doesn't exist
-        os.makedirs('scores', exist_ok=True)
+        global_scores_file = os.path.join(global_scores_dir, f'{safe_model_name}_rp_bench_scores.jsonl')
+        rankings.to_json(global_scores_file, orient='records', lines=True)
+        print(f"\nScores saved to: {global_scores_file}")
         
-        # Save scores
-        scores_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
-        rankings.to_json(scores_file, orient='records', lines=True)
-        print(f"\nScores saved to: {scores_file}")
-        
-        # Save raw answers for analysis
-        answers_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
-        shutil.copy(file_path, answers_file)
-        print(f"Results saved to: {answers_file}")
+        # Copy answers to global locations
+        global_answers_file = os.path.join(global_scores_dir, f'{safe_model_name}_rp_bench_answers.jsonl')
+        shutil.copy(file_path, global_answers_file)
+        print(f"Results saved to: {global_answers_file}")
 
 def load_comparisons_from_file(file_path):
     """Helper function to load comparisons from a file."""

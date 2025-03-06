@@ -36,22 +36,48 @@ source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
 source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
 mamba activate shisa-jp-rp-bench
 
+
+### We use this to make running multiple jobs in parallel possible
+
+# Generate a unique identifier for this job
+JOB_ID="${SLURM_JOB_ID:-$$}"  # Use SLURM job ID if available, otherwise use PID
+TIMESTAMP=$(date +%s)
+UNIQUE_ID="${JOB_ID}_${TIMESTAMP}"
+
+# Create job-specific directories
+TEMP_DIR="./tmp_${UNIQUE_ID}"
+mkdir -p "$TEMP_DIR"
+mkdir -p "${TEMP_DIR}/configs"
+
 # Create temporary config with model name substituted
-envsubst < ./configs/simple_config.yaml > ./configs/temp_config.yaml
+envsubst < ./configs/simple_config.yaml > "${TEMP_DIR}/configs/temp_config.yaml"
+
+###
+
+# log "Clearing curator cache before evaluation..."
+# rm -rf ~/.cache/curator 2>/dev/null || true
+export CURATOR_CACHE_DIR="${TEMP_DIR}/curator_cache"
+mkdir -p "$CURATOR_CACHE_DIR"
 
 # Run the benchmark
 if [ "$LOW_CONTEXT" = "true" ]; then
     log "Running conversation generator with low context..."
-    japanese-rp-bench --config ./configs/temp_config.yaml --low-context
+    japanese-rp-bench --config "${TEMP_DIR}/configs/temp_config.yaml" --low-context
 else
-    japanese-rp-bench --config ./configs/temp_config.yaml
+    japanese-rp-bench --config "${TEMP_DIR}/configs/temp_config.yaml"
 fi
-log "Successfully generated conversation data. Generating shootout data..."
-python generate_shootout_data.py --target-model "$MODEL"
-log "Successfully generated shootout data. Evaluating results with Athene..."
-python conversation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL"
-log "Successfully evaluated results. Running Bradley-Terry comparision..."
-python choix_analyzer.py --target-model "$MODEL" --judge-model "$JUDGE_MODEL"
 
-# Clean up
-rm ./configs/temp_config.yaml
+log "Successfully generated conversation data. Generating shootout data..."
+log "> python generate_shootout_data.py --target-model $MODEL --temp-dir $TEMP_DIR"
+python generate_shootout_data.py --target-model "$MODEL" --temp-dir "$TEMP_DIR"
+
+log "Successfully generated shootout data. Evaluating results with Athene..."
+log "> python conversation_comparer_any_model.py --base-url $JUDGE_URL --judge-model-name $JUDGE_MODEL --test-model-name $MODEL --temp-dir $TEMP_DIR"
+python conversation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL" --temp-dir "$TEMP_DIR"
+
+log "Successfully evaluated results. Running Bradley-Terry comparision..."
+log "> python choix_analyzer.py --target-model $MODEL --judge-model $JUDGE_MODEL --temp-dir $TEMP_DIR"
+python choix_analyzer.py --target-model "$MODEL" --judge-model "$JUDGE_MODEL" --temp-dir "$TEMP_DIR"
+
+# Clean up - we leave our temp folders for now...
+# rm ./configs/temp_config.yaml

@@ -30,7 +30,8 @@ class ConversationComparer(curator.LLM):
 @click.option('--judge-model-name', '-j', required=True, help='Model name to use for judging the conversations')
 @click.option('--test-model-name', '-t', required=False, help='Model name being tested/evaluated')
 @click.option('--generate-base-set', is_flag=True, help='Generate base set comparisons instead of testing a specific model')
-def main(base_url, judge_model_name, test_model_name, generate_base_set):
+@click.option('--temp-dir', help='Temporary directory for job-specific files')
+def main(base_url, judge_model_name, test_model_name, generate_base_set, temp_dir):
     """Compare conversations between different LLMs using a third LLM as analyzer.
 
     Reads the conversation pairs from the JSONL file, creates a dataset,
@@ -42,11 +43,19 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set):
     if test_model_name and generate_base_set:
         raise click.UsageError("Cannot specify both --test-model-name and --generate-base-set")
 
-    # Create output directory if it doesn't exist
-    os.makedirs("analysis", exist_ok=True)
-    
-    # Read conversation pairs from appropriate file
-    input_file = "base_conversation_pairs.jsonl" if generate_base_set else "latest_conversation_pairs.jsonl"
+    if temp_dir:
+        analysis_dir = os.path.join(temp_dir, "analysis")
+        os.makedirs(analysis_dir, exist_ok=True)
+    else:
+        os.makedirs("analysis", exist_ok=True)
+        analysis_dir = "analysis"
+
+    # Read conversation pairs from job-specific file
+    if temp_dir:
+        input_file = os.path.join(temp_dir, "base_conversation_pairs.jsonl" if generate_base_set else "latest_conversation_pairs.jsonl")
+    else:
+        input_file = "base_conversation_pairs.jsonl" if generate_base_set else "latest_conversation_pairs.jsonl"
+
     conversation_pairs = []
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
@@ -78,11 +87,11 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set):
     # Save analysis results
     if generate_base_set:
         safe_judge_model_name = judge_model_name.replace("/", "__")
-        output_path = os.path.join("analysis", f"base_set.{safe_judge_model_name}.jsonl")
+        output_path = os.path.join(analysis_dir, f"base_set.{safe_judge_model_name}.jsonl")
     else:
         safe_test_model_name = test_model_name.replace("/", "__")
         safe_judge_model_name = judge_model_name.replace("/", "__")
-        output_path = os.path.join("analysis", f"{safe_test_model_name}.{safe_judge_model_name}.jsonl")
+        output_path = os.path.join(analysis_dir, f"{safe_test_model_name}.{safe_judge_model_name}.jsonl")
     
     with open(output_path, "w", encoding="utf-8") as f:
         for item in results:
