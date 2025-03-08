@@ -128,7 +128,8 @@ def main(target_model, judge_model, temp_dir):
     # Always load base set comparisons first
     comparisons = []
     # Update file paths to use job-specific directories
-    base_files = [f for f in glob.glob(os.path.join(analysis_dir, 'base_set.*.jsonl'))]
+    safe_judge_name = judge_model.replace("/", "__")
+    base_files = [f'analysis/base_set.{safe_judge_name}.jsonl']
     if base_files:
         print("\nProcessing base set comparisons...")
         for base_file in base_files:
