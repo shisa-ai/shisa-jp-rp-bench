@@ -6,7 +6,7 @@ LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
 OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
 OPENAI_COMPATIBLE_API_KEY="${OPENAI_COMPATIBLE_API_KEY:-x}"  # API Key for the model
 JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
-JUDGE_MODEL="${JUDGE_MODEL:-Nexusflow/Athene-V2-Chat}"  # Default judge model
+JUDGE_MODEL="${JUDGE_MODEL:-athene-v2}"  # Default judge model
 
 # Validate required arguments
 if [ -z "$MODEL" ] || [ -z "$OPENAI_URL" ]; then
