@@ -107,7 +107,7 @@ def generate_conversation_pairs(target_file=None, generate_base=False, temp_dir=
     
     # Number of rows to use from each conversation file and dataset
     # Maximum is 30 as that's the total number of conversations per file
-    rows_to_use = 15
+    rows_to_use = 20
     
     # Add warning and confirmation for base_conversation_pairs.jsonl
     if output_file == "base_conversation_pairs.jsonl":
