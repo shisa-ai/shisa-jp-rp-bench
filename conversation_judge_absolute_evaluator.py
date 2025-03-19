@@ -183,7 +183,9 @@ def main(target_model, judge_model_name, num_conversations, temp_dir):
         target_file = target_model
     else:
         # It's a model name, transform it into the target file path
-        target_file = target_model.replace('/', '-') + '_shisa-ai-shisa-rp-bench-testset.jsonl'
+        filename = target_model.replace('/', '-') + '_shisa-ai-shisa-rp-bench-testset.jsonl'
+        # Look for the file in the conversations directory
+        target_file = os.path.join('conversations', filename)
     
     print(f"Processing file: {target_file}")
     
