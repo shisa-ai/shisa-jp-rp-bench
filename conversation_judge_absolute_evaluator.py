@@ -275,47 +275,28 @@ def main(target_model, judge_model_name, num_conversations, temp_dir):
     
     # Save results to a file if requested
     if temp_dir:
-        output_dir = os.path.join(temp_dir, "analysis")
-        os.makedirs(output_dir, exist_ok=True)
         scores_dir = os.path.join(temp_dir, "scores")
         os.makedirs(scores_dir, exist_ok=True)
     else:
-        os.makedirs("analysis", exist_ok=True)
-        output_dir = "analysis"
         os.makedirs("scores", exist_ok=True)
         scores_dir = "scores"
     
-    # Create a filename for the results
+    # Create filenames for the results
     model_name = formatted_conversations[0]['llm']
     safe_model_name = model_name.replace("/", "__")
     safe_judge_name = judge_model_name.replace("/", "__")
-    output_file = os.path.join(output_dir, f"{safe_model_name}.{safe_judge_name}.jsonl")
     scores_file = os.path.join(scores_dir, f"{safe_model_name}_rp_bench_scores.json")
     
-    # Copy the original conversation file to scores directory with new naming convention
-    original_file = target_file
-    if not os.path.isabs(original_file):
-        # Check in conversations directory first
-        if os.path.exists(os.path.join("conversations", original_file)):
-            original_file = os.path.join("conversations", original_file)
-        # Then check in base_conversations if not found
-        elif os.path.exists(os.path.join("base_conversations", original_file)):
-            original_file = os.path.join("base_conversations", original_file)
+    # Define the destination file path for the original conversations
+    dest_file = os.path.join(scores_dir, f"{safe_model_name}_rp_bench_answers.jsonl")
     
-    # Define the destination file path
-    dest_file = os.path.join(scores_dir, f"{safe_model_name}_rp_bench_scores.jsonl")
+    # Save the original conversations from the target file directly
+    conversations = load_jsonl(target_file)
+    with open(dest_file, "w", encoding="utf-8") as f:
+        for conv in conversations:
+            f.write(json.dumps(conv, ensure_ascii=False) + "\n")
     
-    # Copy the file
-    if os.path.exists(original_file):
-        shutil.copy2(original_file, dest_file)
-        print(f"Copied original conversations to {dest_file}")
-    else:
-        print(f"Warning: Could not find original file {original_file} to copy")
-    
-    # Save the results
-    with open(output_file, "w", encoding="utf-8") as f:
-        for item in results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    print(f"Original conversations saved to {dest_file}")
     
     # Save category averages and overall average to scores file
     scores_data = {
@@ -341,8 +322,7 @@ def main(target_model, judge_model_name, num_conversations, temp_dir):
     with open(scores_file, "w", encoding="utf-8") as f:
         json.dump(scores_data, f, ensure_ascii=False, indent=2)
     
-    print(f"\nResults saved to {output_file}")
-    print(f"Scores summary saved to {scores_file}")
+    print(f"\nResults saved to {scores_file}")
 
 
 if __name__ == "__main__":
