@@ -1,4 +1,4 @@
-dataset_repo: "Aratako/Japanese-RP-Bench-testdata-SFW"
+dataset_repo: "shisa-ai/shisa-rp-bench-testset"
 dataset_split: "train"
 target_model_name: "${MODEL}"
 target_inference_method: "openai_compatible_api"

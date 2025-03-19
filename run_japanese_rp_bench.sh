@@ -67,17 +67,10 @@ else
     japanese-rp-bench --config "${TEMP_DIR}/configs/temp_config.yaml"
 fi
 
-log "Successfully generated conversation data. Generating shootout data..."
-log "> python generate_shootout_data.py --target-model $MODEL --temp-dir $TEMP_DIR"
-python generate_shootout_data.py --target-model "$MODEL" --temp-dir "$TEMP_DIR"
+log "Running absolute evaluation with Gemini..."
+log "> CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py --judge-model-name gemini/gemini-2.0-flash --target-model $MODEL"
+CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py --judge-model-name gemini/gemini-2.0-flash --target-model "$MODEL"
 
-log "Successfully generated shootout data. Evaluating results with Athene..."
-log "> python conversation_comparer_any_model.py --base-url $JUDGE_URL --judge-model-name $JUDGE_MODEL --test-model-name $MODEL --temp-dir $TEMP_DIR"
-python conversation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL" --temp-dir "$TEMP_DIR"
-
-log "Successfully evaluated results. Running Bradley-Terry comparision..."
-log "> python choix_analyzer.py --target-model $MODEL --judge-model $JUDGE_MODEL --temp-dir $TEMP_DIR"
-python choix_analyzer.py --target-model "$MODEL" --judge-model "$JUDGE_MODEL" --temp-dir "$TEMP_DIR"
 
 # Clean up - we leave our temp folders for now...
 # rm ./configs/temp_config.yaml

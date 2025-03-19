@@ -152,7 +152,7 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
     log "VLLM server is ready"
     
     # Now that we're further down, activate Japanese-RP-Bench
-    mamba activate shisa-rp-bench
+    mamba activate shisa-jp-rp-bench
     log "Starting eval script"
     curl http://localhost:8000/v1/models 2>&1
     export OPENAI_COMPATIBLE_API_KEY="cat" 
