@@ -8,7 +8,7 @@ __pycache__/
 logs/
 scores/
 conversations/
-
+analysis/
 base_conversation_pairs.jsonl
 latest_conversation_pairs.jsonl
 tmp*
