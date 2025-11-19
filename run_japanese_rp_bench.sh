@@ -4,9 +4,10 @@
 MODEL="${MODEL:-}"  # Use empty string if MODEL is not set
 LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
 OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
-OPENAI_COMPATIBLE_API_KEY="${OPENAI_COMPATIBLE_API_KEY:-x}"  # API Key for the model
+OPENAI_COMPATIBLE_API_KEY="${OPENAI_COMPATIBLE_API_KEY:-EMPTY}"  # API Key for the model
 JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
 JUDGE_MODEL="${JUDGE_MODEL:-athene-v2}"  # Default judge model
+JUDGE_OPENAI_COMPATIBLE_API_KEY="${JUDGE_OPENAI_COMPATIBLE_API_KEY:-EMPTY}"
 
 # Validate required arguments
 if [ -z "$MODEL" ] || [ -z "$OPENAI_URL" ]; then
@@ -25,16 +26,10 @@ log() {
 log "Starting eval script."
 log "Generating conversation data..."
 # Set environment variables for API endpoints
-# We pass this in...
-# export OPENAI_COMPATIBLE_API_KEY="x" 
+export OPENAI_COMPATIBLE_API_KEY
 export OPENAI_COMPATIBLE_API_URL="$OPENAI_URL"
-export JUDGE_OPENAI_COMPATIBLE_API_KEY="x"
+export JUDGE_OPENAI_COMPATIBLE_API_KEY
 export JUDGE_OPENAI_COMPATIBLE_API_URL="$JUDGE_URL"
-
-# Initialize and activate conda/mamba
-source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
-source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
-mamba activate shisa-jp-rp-bench
 
 
 ### We use this to make running multiple jobs in parallel possible
