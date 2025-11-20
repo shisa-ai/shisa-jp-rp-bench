@@ -5,6 +5,9 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import google.genai as genai
+from google.genai import types as genai_types
+
 
 # 各種モデルをロードするための抽象化された関数
 def load_model(
@@ -92,17 +95,15 @@ def load_model(
         client = Client(api_key=api_key)
         return client, None
 
-    # Google AI APIの場合
+    # Google AI APIの場合 (Gemini via google-genai)
     elif inference_method == "google_api":
-        from google.generativeai import configure, GenerativeModel
-        api_key = os.getenv("GOOGLE_API_KEY") or None
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or None
         if not api_key:
             raise ValueError(
-                "google api key is not set, please set GOOGLE_API_KEY in environment variable."
+                "google api key is not set, please set GOOGLE_API_KEY or GEMINI_API_KEY in environment variable."
             )
-        configure(api_key=api_key)
-        model = GenerativeModel(model_name)
-        return model, None
+        client = genai.Client(api_key=api_key)
+        return client, None
 
     # MistralAI APIの場合
     elif inference_method == "mistralai_api":
@@ -311,32 +312,31 @@ def generate_response(
         )
         response = result.text.strip()
 
-    # Google AI APIの場合
+    # Google AI APIの場合 (Gemini via google-genai)
     elif inference_method == "google_api":
-        generation_config = {
-            "temperature": 0.7,
-            "max_output_tokens": 1024,
-            "response_mime_type": "text/plain",
-        }
-        model = model.model
-        safety_settings={
-            "HATE": "BLOCK_NONE",
-            "HARASSMENT": "BLOCK_NONE",
-            "SEXUAL": "BLOCK_NONE",
-            "DANGEROUS": "BLOCK_NONE",
-        }
-        system_instruction=system_prompt
-        history = []
-        for i, conversation in enumerate(conversations):
-            if i == len(conversations) - 1:
-                message = conversation["content"]
-            else:
-                if i % 2 == 0:
-                    history.append({"role": "user", "parts": conversation["content"]})
-                else:
-                    history.append({"role": "model", "parts": conversation["content"]})
-        chat_session = model.start_chat(history=history)
-        result = chat_session.send_message(message)
+        # `model` is a google.genai.Client instance from load_model
+        client = model
+        max_tokens = 128 if ultra_low_context else (256 if low_context else 1024)
+
+        generation_config = genai_types.GenerateContentConfig(
+            temperature=0.7,
+            max_output_tokens=max_tokens,
+            response_mime_type="text/plain",
+        )
+
+        # Flatten system prompt + conversation turns into a single text prompt
+        message_lines: List[str] = [system_prompt, ""]
+        for conv in conversations:
+            role = conv.get("role", "user")
+            content = conv.get("content", "")
+            message_lines.append(f"{role}: {content}")
+        message = "\n".join(message_lines)
+
+        result = client.models.generate_content(
+            model=model_name,
+            contents=message,
+            config=generation_config,
+        )
         response = result.text.strip()
 
     # MistralAI APIの場合

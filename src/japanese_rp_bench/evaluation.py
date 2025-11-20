@@ -2,8 +2,9 @@
 
 from typing import Any, List, Optional
 
-import google.generativeai as genai
 import os
+import google.genai as genai
+from google.genai import types as genai_types
 from openai import OpenAI
 
 
@@ -120,27 +121,41 @@ def evaluate_conversation(
         )
         evaluation_result = '{"Evaluation Reason": ' + result.content[0].text.strip()
 
-    # Google AI APIの場合
+    # Google AI APIの場合 (Gemini via google-genai)
     elif inference_method == "google_api":
-        generation_config = {
-            "temperature": 0,
-            "max_output_tokens": 1024,
-            "response_mime_type": "application/json",
-        }
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config=generation_config,
-            safety_settings={
-                "HATE": "BLOCK_NONE",
-                "HARASSMENT": "BLOCK_NONE",
-                "SEXUAL": "BLOCK_NONE",
-                "DANGEROUS": "BLOCK_NONE",
-            },
-            system_instruction=evaluation_prompt,
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or None
+        if not api_key:
+            raise ValueError(
+                "google api key is not set, please set GOOGLE_API_KEY or GEMINI_API_KEY in environment variables."
+            )
+
+        client = genai.Client(api_key=api_key)
+
+        generation_config = genai_types.GenerateContentConfig(
+            temperature=0,
+            max_output_tokens=1024,
+            response_mime_type="application/json",
+            safety_settings=[
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"
+                ),
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"
+                ),
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"
+                ),
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"
+                ),
+            ],
         )
-        message = input_text
-        chat_session = model.start_chat()
-        result = chat_session.send_message(message)
+
+        result = client.models.generate_content(
+            model=model_name,
+            contents=input_text,
+            config=generation_config,
+        )
         evaluation_result = result.text.strip()
 
     # vLLMを使ってローカルで推論する場合

@@ -1,101 +1,23 @@
-import os
-import json
-from datasets import Dataset
-from bespokelabs import curator
-import click
+"""Legacy conversation comparison entrypoint.
+
+The original implementation used an external orchestration framework to
+analyze conversation pairs. That dependency has been removed from this
+repository. If you need the old comparison behavior, please refer to the
+git history of this file.
+"""
+
+import sys
 
 
-class ConversationComparer(curator.LLM):
-    """Compares two LLM conversations and analyzes their differences."""
-
-    def prompt(self, input: dict) -> str:
-        """Generate a prompt for comparison using the template from prompt.txt and the conversation data."""
-        with open("prompt.txt", "r", encoding="utf-8") as f:
-            prompt_template = f.read()
-        return prompt_template.replace("{{conversation_data}}", input["formatted_data"])
-
-    def parse(self, input: dict, response: str) -> dict:
-        """Parse the model response along with the input data into the desired output format."""
-        return {
-            "id": input["id"],
-            "llm_a": input["llm_a"],
-            "llm_b": input["llm_b"],
-            "formatted_data": input["formatted_data"],
-            "analysis": response
-        }
-
-
-@click.command()
-@click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
-@click.option('--judge-model-name', '-j', required=True, help='Model name to use for judging the conversations')
-@click.option('--test-model-name', '-t', required=False, help='Model name being tested/evaluated')
-@click.option('--generate-base-set', is_flag=True, help='Generate base set comparisons instead of testing a specific model')
-@click.option('--temp-dir', help='Temporary directory for job-specific files')
-def main(base_url, judge_model_name, test_model_name, generate_base_set, temp_dir):
-    """Compare conversations between different LLMs using a third LLM as analyzer.
-
-    Reads the conversation pairs from the JSONL file, creates a dataset,
-    and uses an LLM to analyze the differences. Saves the analysis results
-    to a new JSONL file.
-    """
-    if not test_model_name and not generate_base_set:
-        raise click.UsageError("Either --test-model-name or --generate-base-set must be specified")
-    if test_model_name and generate_base_set:
-        raise click.UsageError("Cannot specify both --test-model-name and --generate-base-set")
-
-    if temp_dir:
-        analysis_dir = os.path.join(temp_dir, "analysis")
-        os.makedirs(analysis_dir, exist_ok=True)
-    else:
-        os.makedirs("analysis", exist_ok=True)
-        analysis_dir = "analysis"
-
-    # Read conversation pairs from job-specific file
-    if temp_dir:
-        input_file = os.path.join(temp_dir, "base_conversation_pairs.jsonl" if generate_base_set else "latest_conversation_pairs.jsonl")
-    else:
-        input_file = "base_conversation_pairs.jsonl" if generate_base_set else "latest_conversation_pairs.jsonl"
-
-    conversation_pairs = []
-    with open(input_file, "r", encoding="utf-8") as f:
-        for line in f:
-            conversation_pairs.append(json.loads(line))
-    
-    # Create dataset and shuffle it
-    conversations = Dataset.from_list(conversation_pairs)
-    conversations = conversations.shuffle(seed=42)  # Set seed for reproducibility
-    # vLLM settings (commented out for now)
-    # HOST = "localhost"
-    # PORT = 8000
-    # model_path = "hosted_vllm/meta-llama/Llama-3.3-70B-Instruct"
-    # model_name = model_path
-    backend = "litellm"
-    backend_params = {"base_url": base_url,
-        "max_requests_per_minute": 5000,
-        "max_tokens_per_minute": 1000000,
-        "max_concurrent_requests": 128,
-    }  
-
-    comparer = ConversationComparer(
-        model_name="hosted_vllm/"+ judge_model_name,
-        backend=backend,  
-        backend_params=backend_params,
+def main() -> None:
+    """Notify callers that the legacy comparer has been removed."""
+    sys.stderr.write(
+        "conversation_comparer_any_model.py: the legacy comparison\n"
+        "pipeline has been removed from this repo. Please use the absolute\n"
+        "judge path (judge_conversations.py) or consult git history for the\n"
+        "original implementation.\n"
     )
-
-    results = comparer(conversations)
-    
-    # Save analysis results
-    if generate_base_set:
-        safe_judge_model_name = judge_model_name.replace("/", "__")
-        output_path = os.path.join(analysis_dir, f"base_set.{safe_judge_model_name}.jsonl")
-    else:
-        safe_test_model_name = test_model_name.replace("/", "__")
-        safe_judge_model_name = judge_model_name.replace("/", "__")
-        output_path = os.path.join(analysis_dir, f"{safe_test_model_name}.{safe_judge_model_name}.jsonl")
-    
-    with open(output_path, "w", encoding="utf-8") as f:
-        for item in results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

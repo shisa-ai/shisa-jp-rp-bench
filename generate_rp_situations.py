@@ -2,7 +2,6 @@ import os
 import json
 import hashlib
 import click
-from bespokelabs import curator
 from datasets import Dataset, load_dataset, concatenate_datasets
 import re
 import random
@@ -23,75 +22,6 @@ RP_PROMPT_TEMPLATE = """以下の構造で詳細な日本語ロールプレイ�
 
 # List of genres to choose from
 GENRES = ["ファンタジー", "ホラー", "恋愛", "SF", "ミステリー", "コメディ", "歴史", "学園", "職場", "日常", "アクション", "異世界"]
-
-class RPSituationGenerator(curator.LLM):
-    """Generates roleplay situations using a fixed prompt."""
-
-    def prompt(self, input: dict) -> str:
-        """Return the prompt with a randomly selected genre."""
-        # Select a random genre from the list
-        genre = GENRES[input["index"] % len(GENRES)] if "index" in input else random.choice(GENRES)
-        
-        # Format the prompt template with the selected genre
-        return RP_PROMPT_TEMPLATE.format(genre=genre)
-
-    def parse(self, input: dict, response: str) -> dict:
-        """Parse the model response into the desired output format."""
-        try:
-            # Extract JSON from code blocks if present
-            if response.strip().startswith("```") and "```" in response:
-                # Find content between the first set of triple backticks
-                code_pattern = r"```(?:json)?\n([\s\S]*?)\n```"
-                match = re.search(code_pattern, response)
-                if match:
-                    json_content = match.group(1)
-                else:
-                    json_content = response
-            else:
-                json_content = response
-            
-            # Try to parse the JSON response
-            parsed_response = json.loads(json_content)
-            
-            # Ensure all expected fields are present
-            expected_fields = ["genre", "tag", "world_setting", "scene_setting", 
-                              "user_setting", "assistant_setting", "dialogue_tone", 
-                              "first_user_input"]
-            
-            # Create a clean response with all expected fields
-            clean_response = {}
-            
-            for field in expected_fields:
-                if field in parsed_response:
-                    # For user_setting and assistant_setting, collapse any nested structure
-                    if field in ["user_setting", "assistant_setting"] and isinstance(parsed_response[field], dict):
-                        # Format each field with name: content and join with newlines
-                        formatted_fields = []
-                        for k, v in parsed_response[field].items():
-                            formatted_fields.append(f"{k}: {v}")
-                        clean_response[field] = "\n".join(formatted_fields)
-                    else:
-                        clean_response[field] = parsed_response[field]
-                else:
-                    clean_response[field] = ""
-            
-            return {
-                "id": input["id"],
-                "llm": input["model_name"],
-                "prompt": self.prompt(input),
-                "response": response,
-                "parsed_response": clean_response
-            }
-        except (json.JSONDecodeError, Exception) as e:
-            # If the response isn't valid JSON, return the raw response
-            return {
-                "id": input["id"],
-                "llm": input["model_name"],
-                "prompt": self.prompt(input),
-                "response": response,
-                "parsed_response": None,
-                "error": f"Failed to parse JSON response: {str(e)}"
-            }
 
 
 def merge_and_upload_datasets(generated_data_path):
@@ -195,40 +125,20 @@ def main(model_name, num_situations, output_file, merge_and_upload):
     """
     print(f"Generating {num_situations} RP situations using model: {model_name}")
     
-    # Configure backend
-    backend = "litellm"
-    backend_params = {
-        "max_requests_per_minute": 5000,
-        "max_tokens_per_minute": 1000000,
-        "max_concurrent_requests": 128,
-    }  
+    # NOTE: The original implementation used an external orchestration
+    # framework here. That dependency has been removed from this repo.
+    # For now we only support the downstream merge/upload path assuming
+    # `output_file` already contains generated situations.
 
-    # Initialize the generator
-    generator = RPSituationGenerator(
-        model_name=model_name,
-        backend=backend,  
-        backend_params=backend_params,
-    )
+    if os.path.exists(output_file):
+        print(f"Found existing situations at {output_file}; skipping generation.")
+    else:
+        print("Automatic RP situation generation has been removed; please provide a"
+              f" pre-generated JSON file at {output_file} if you want to"
+              " use merge/upload functionality.")
+        results_list = []
 
-    # Create input dataset with unique IDs
-    input_data = []
-    for i in range(num_situations):
-        input_data.append({
-            "id": hashlib.md5(f"rp_situation_{i}".encode()).hexdigest(),
-            "model_name": model_name,
-            "index": i
-        })
-    
-    input_dataset = Dataset.from_list(input_data)
-    
-    # Generate all situations
-    print(f"Sending {num_situations} requests to the model...")
-    results = generator(input_dataset)
-    
-    # Convert Dataset to a list of dictionaries
-    results_list = results.to_list()
-    
-    # Save results to a file
+    # Save results to a file (no-op if we just reuse an existing file)
     output_dir = os.path.dirname(output_file)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)

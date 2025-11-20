@@ -5,8 +5,8 @@ MODEL="${MODEL:-}"  # Use empty string if MODEL is not set
 LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
 OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
 OPENAI_COMPATIBLE_API_KEY="${OPENAI_COMPATIBLE_API_KEY:-EMPTY}"  # API Key for the model
-JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
-JUDGE_MODEL="${JUDGE_MODEL:-athene-v2}"  # Default judge model
+JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL (for external judge endpoints, if used)
+JUDGE_MODEL="${JUDGE_MODEL:-gemini/gemini-2.0-flash}"  # Default judge model label
 JUDGE_OPENAI_COMPATIBLE_API_KEY="${JUDGE_OPENAI_COMPATIBLE_API_KEY:-EMPTY}"
 
 # Validate required arguments
@@ -49,13 +49,7 @@ envsubst < ./configs/simple_config.yaml > "${TEMP_DIR}/configs/temp_config.yaml"
 
 ###
 
-# Setup curator cache only if we're running absolute eval
-if [ "$SKIP_ABSOLUTE_EVAL" != "true" ]; then
-    export CURATOR_CACHE_DIR="${TEMP_DIR}/curator_cache"
-    mkdir -p "$CURATOR_CACHE_DIR"
-fi
-
-# Run the benchmark
+# Run the benchmark (conversation generation only)
 if [ "$LOW_CONTEXT" = "true" ]; then
     log "Running conversation generator with low context..."
     japanese-rp-bench --config "${TEMP_DIR}/configs/temp_config.yaml" --low-context

@@ -92,14 +92,18 @@ def main(judge_model_name, num_conversations):
             # Run the evaluation script
             file_path = os.path.join(base_dir, file_name)
             cmd = [
-                "python", "conversation_judge_absolute_evaluator.py",
-                "--target-model", file_path,
-                "--judge-model-name", judge_model_name,
-                "--num-conversations", str(num_conversations)
+                "python",
+                "judge_conversations.py",
+                "--target-model",
+                file_path,
+                "--judge-model-name",
+                judge_model_name,
+                "--num-conversations",
+                str(num_conversations),
             ]
-            
+
             print(f"  Running: {' '.join(cmd)}")
-            subprocess.run(cmd, env={**os.environ, "CURATOR_DISABLE_CACHE": "true"})
+            subprocess.run(cmd, check=False)
     
     # Collect results from absolute_analysis directory
     print("\nCollecting results...")

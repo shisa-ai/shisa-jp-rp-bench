@@ -14,12 +14,12 @@ This is a benchmarking tool for comparing models' roleplay (RP) ability, with ju
 
 ## How To Run RP Bench
 
-### With Default Model (Athene-v2 at its alias)
+### With Default Judge (Gemini 2.0 Flash)
 MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
 
-### With Specified Judge (If you don't want to use Athene-v2)
+### With Specified Judge (If you don't want to use the default)
 
-MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" JUDGE_MODEL="Nexusflow/Athene-V2-Chat" JUDGE_URL="http://athenev2/v1" ./run_japanese_rp_bench.sh
+MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" JUDGE_MODEL="gemini/gemini-2.0-flash" JUDGE_URL="http://athenev2/v1" ./run_japanese_rp_bench.sh
 
 ### With Low Context (If you need 8192 Context Length)
 LOW_CONTEXT="true" MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
@@ -27,8 +27,8 @@ LOW_CONTEXT="true" MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://
 Breakdown:
 MODEL = Model name in standard format. 
 OPENAI_URL = URL used by the model. (Probably localhost:8000/v1 in most cases, I assume)
-JUDGE_NAME = Name of the judge model.  Defaults to Athene. 
-JUDGE_URL = Judge API URL. I recommend using only Athene, as Tulu/Llama3.3 have given extremely spotty results. 
+JUDGE_NAME = Name of the judge model. Defaults to Gemini 2.0 Flash in this repo. 
+JUDGE_URL = Judge API URL for any external judge endpoint (the default absolute evaluator uses the native Google Generative AI SDK with `GEMINI_API_KEY`). 
 LOW_CONTEXT= Forces the model to use 8192 context window. Off by default. 
 
 

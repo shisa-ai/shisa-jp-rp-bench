@@ -27,7 +27,7 @@ for file in "${conversation_files[@]}"; do
     echo "Path: $file"
     echo "----------------------------------------"
     
-    CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py \
+    python judge_conversations.py \
         --judge-model-name gemini/gemini-2.0-flash \
         --target-model "$file"
     
