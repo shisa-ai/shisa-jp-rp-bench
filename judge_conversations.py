@@ -21,6 +21,30 @@ import google.genai as genai
 from google.genai import types as genai_types
 
 
+def _schema_to_request_dict(schema: genai_types.Schema) -> dict:
+    """Convert a google-genai Schema into a JSON-serializable dict.
+
+    The Gemini REST API expects Schema fields in lowerCamelCase (protobuf JSON
+    encoding). Some google-genai call paths have been observed to serialize
+    nested Schema objects with snake_case field names (e.g. `additional_properties`),
+    which the API rejects with HTTP 400 INVALID_ARGUMENT. Passing a plain dict
+    using schema aliases avoids this.
+    """
+    from enum import Enum
+
+    def normalize(value):  # type: ignore[no-untyped-def]
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, dict):
+            return {k: normalize(v) for k, v in value.items() if v is not None}
+        if isinstance(value, list):
+            return [normalize(v) for v in value if v is not None]
+        return value
+
+    dumped = schema.model_dump(by_alias=True, exclude_none=True)
+    return normalize(dumped)
+
+
 EVALUATION_SCHEMA = genai_types.Schema(
     type="object",
     additional_properties=False,
@@ -206,7 +230,7 @@ class ConversationJudgeAbsolute:
             temperature=0,
             max_output_tokens=8192,
             response_mime_type="application/json",
-            response_schema=EVALUATION_SCHEMA,
+            response_schema=_schema_to_request_dict(EVALUATION_SCHEMA),
             safety_settings=safety_settings,
             thinking_config=genai_types.ThinkingConfig(include_thoughts=False),
         )
