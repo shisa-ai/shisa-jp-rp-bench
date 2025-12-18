@@ -1,12 +1,16 @@
 # models.py
 
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import google.genai as genai
 from google.genai import types as genai_types
+
+
+logger = logging.getLogger("japanese_rp_bench")
 
 
 # 各種モデルをロードするための抽象化された関数
@@ -183,37 +187,105 @@ def generate_response(
     low_context: bool = False,
     ultra_low_context: bool = False,
 ) -> str:
+    # Optional global max-tokens override (e.g., from Multieval).
+    override_max_tokens: Optional[int] = None
+    try:
+        env_val = os.getenv("JP_RP_MAX_TOKENS")
+        if env_val is not None:
+            override_max_tokens = int(env_val)
+    except Exception:
+        override_max_tokens = None
+
     # OpenAIやOpenAI互換のAPIの場合
     if inference_method in ["openai_api", "openai_compatible_api"]:
-        if "o1" in model_name:
-            messages = []
-            # o1はシステムプロンプトをサポートしていないのでシステムプロンプトと最初の会話を結合
-            first_conversation = conversations[0]
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"{system_prompt}\n\n{first_conversation['content']}",
-                }
-            )
-            # 残りの会話を追加
-            messages.extend(conversations[1:])
-            result = model.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=128 if ultra_low_context else (256 if low_context else 1024),
-                temperature=0.7,
-            )
-        else:
-            # o1以外のモデルの場合
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(conversations)
-            result = model.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=128 if ultra_low_context else (256 if low_context else 1024),
-                temperature=0.7,
-            )
-        response = result.choices[0].message.content.strip()
+        try:
+            if "o1" in model_name:
+                messages = []
+                # o1はシステムプロンプトをサポートしていないのでシステムプロンプトと最初の会話を結合
+                first_conversation = conversations[0]
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"{system_prompt}\n\n{first_conversation['content']}",
+                    }
+                )
+                # 残りの会話を追加
+                messages.extend(conversations[1:])
+                max_tokens = (
+                    override_max_tokens
+                    if override_max_tokens is not None
+                    else 128 if ultra_low_context else (256 if low_context else 1024)
+                )
+                result = model.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=0.7,
+                )
+            else:
+                # o1以外のモデルの場合
+                messages = [{"role": "system", "content": system_prompt}]
+                messages.extend(conversations)
+                max_tokens = (
+                    override_max_tokens
+                    if override_max_tokens is not None
+                    else 128 if ultra_low_context else (256 if low_context else 1024)
+                )
+                result = model.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=0.7,
+                )
+        except Exception as exc:
+            # Treat hard API failures (e.g., 5xx from an OpenAI-compatible server)
+            # as empty assistant outputs so that the benchmark can continue and
+            # the model is effectively penalized instead of aborting the run.
+            status_code = getattr(exc, "status_code", None)
+            error_text = str(exc)
+            is_5xx = isinstance(status_code, int) and 500 <= status_code <= 599
+            if is_5xx or "Error code: 5" in error_text:
+                logger.error(
+                    "OpenAI-compatible API error for model %s (treated as empty response): %s",
+                    model_name,
+                    error_text,
+                )
+                return ""
+            # For non-API or configuration errors, re-raise so they are visible.
+            raise
+        # Gemini / OpenAI-compatible endpoints may sometimes return a choice
+        # with `message.content is None` (e.g., safety refusals) or use the
+        # newer block-based content format. Handle these cases gracefully
+        # instead of raising on `.strip()`.
+        choice = result.choices[0] if getattr(result, "choices", None) else None
+        message = getattr(choice, "message", None) if choice is not None else None
+
+        raw_content = getattr(message, "content", None) if message is not None else None
+        refusal = getattr(message, "refusal", None) if message is not None else None
+
+        # Prefer content when present; fall back to refusal text if provided.
+        content: Union[str, List[Any], None] = raw_content
+        if content is None and isinstance(refusal, str):
+            content = refusal
+
+        # Support list-style content blocks (Responses API / content parts).
+        if isinstance(content, list):
+            parts: List[str] = []
+            for part in content:
+                text = None
+                if isinstance(part, dict):
+                    text = part.get("text")
+                else:
+                    text = getattr(part, "text", None)
+                if text:
+                    parts.append(text)
+            content = "".join(parts) if parts else ""
+
+        if content is None:
+            # Treat hard refusals / malformed responses as empty assistant output
+            content = ""
+
+        response = str(content).strip()
 
     # AnthropicのAPIの場合
     elif inference_method == "anthropic_api":
@@ -252,12 +324,13 @@ def generate_response(
                         ],
                     }
                 )
+        max_tokens = override_max_tokens if override_max_tokens is not None else 1024
         result = model.messages.create(
             model=model_name,
             system=system,
             messages=messages,
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
         )
         response = result.content[0].text.strip()
@@ -277,12 +350,13 @@ def generate_response(
                     ],
                 }
             )
+        max_tokens = override_max_tokens if override_max_tokens is not None else 1024
         result = model.messages.create(
             model=model_name,
             system=system_prompt,
             messages=messages,
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
         response = result.content[0].text.strip()
 
@@ -302,13 +376,14 @@ def generate_response(
                     chat_history.append(
                         {"role": "Chatbot", "message": conversation["content"]}
                     )
+        max_tokens = override_max_tokens if override_max_tokens is not None else 1024
         result = model.chat(
             model=model_name,
             message=message,
             chat_history=chat_history,
             preamble=preamble,
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
         response = result.text.strip()
 
@@ -316,7 +391,11 @@ def generate_response(
     elif inference_method == "google_api":
         # `model` is a google.genai.Client instance from load_model
         client = model
-        max_tokens = 128 if ultra_low_context else (256 if low_context else 1024)
+        max_tokens = (
+            override_max_tokens
+            if override_max_tokens is not None
+            else 128 if ultra_low_context else (256 if low_context else 1024)
+        )
 
         generation_config = genai_types.GenerateContentConfig(
             temperature=0.7,
@@ -343,11 +422,12 @@ def generate_response(
     elif inference_method == "mistralai_api":
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(conversations)
+        max_tokens = override_max_tokens if override_max_tokens is not None else 1024
         result = model.chat.complete(
             model=model_name,
             messages=messages,
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
         response = result.choices[0].message.content.strip()
 
@@ -357,7 +437,7 @@ def generate_response(
         messages.extend(conversations)
         sampling_params = SamplingParams(
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=override_max_tokens if override_max_tokens is not None else 1024,
         )
         input_text = tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, tokenize=False
@@ -375,7 +455,12 @@ def generate_response(
         ).to(model.device)
         input_ids = return_output["input_ids"]
         attention_mask = return_output["attention_mask"]
-        result = model.generate(input_ids, attention_mask=attention_mask, temperature=0.7, max_new_tokens=1024)
+        result = model.generate(
+            input_ids,
+            attention_mask=attention_mask,
+            temperature=0.7,
+            max_new_tokens=override_max_tokens if override_max_tokens is not None else 1024,
+        )
         response = tokenizer.decode(
             result.tolist()[0][input_ids.size(1) :], skip_special_tokens=True
         ).strip()

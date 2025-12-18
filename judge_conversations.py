@@ -21,6 +21,34 @@ import google.genai as genai
 from google.genai import types as genai_types
 
 
+EVALUATION_SCHEMA = genai_types.Schema(
+    type="object",
+    additional_properties=False,
+    required=[
+        "Evaluation Reason",
+        "Roleplay Adherence",
+        "Consistency",
+        "Contextual Understanding",
+        "Expressiveness",
+        "Creativity",
+        "Naturalness of Japanese",
+        "Enjoyment of the Dialogue",
+        "Appropriateness of Turn-Taking",
+    ],
+    properties={
+        "Evaluation Reason": genai_types.Schema(type="string"),
+        "Roleplay Adherence": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Consistency": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Contextual Understanding": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Expressiveness": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Creativity": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Naturalness of Japanese": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Enjoyment of the Dialogue": genai_types.Schema(type="integer", minimum=1, maximum=5),
+        "Appropriateness of Turn-Taking": genai_types.Schema(type="integer", minimum=1, maximum=5),
+    },
+)
+
+
 def load_jsonl(file_path):
     data = []
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -124,7 +152,9 @@ def generate_formatted_conversations(target_file, num_conversations=None):
 
         # Create conversation data
         conv_data = {
-            "id": hashlib.md5(f"{filename}_{idx}".encode()).hexdigest(),
+            # Use the original dataset/conversation ID when available so that
+            # downstream artifacts can join against `*_rp_bench_answers.jsonl`.
+            "id": str(conv.get("id") or settings.get("id") or idx),
             "llm": model_name,
             "settings": settings,
             "formatted_data": formatted_data
@@ -176,7 +206,9 @@ class ConversationJudgeAbsolute:
             temperature=0,
             max_output_tokens=8192,
             response_mime_type="application/json",
+            response_schema=EVALUATION_SCHEMA,
             safety_settings=safety_settings,
+            thinking_config=genai_types.ThinkingConfig(include_thoughts=False),
         )
 
         # Load prompt template
@@ -186,6 +218,7 @@ class ConversationJudgeAbsolute:
         # Track stats
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_thought_tokens = 0
         self.failed_items = []
         self.lock = threading.Lock()
 
@@ -228,14 +261,28 @@ class ConversationJudgeAbsolute:
                             raise ValueError(f"Response blocked: {response.prompt_feedback}")
                         raise ValueError("Empty response from API")
 
-                    response_text = response.text
+                    # Prefer schema-parsed output when available; fall back to raw text.
+                    parsed_payload = getattr(response, "parsed", None)
+                    if parsed_payload is not None:
+                        if hasattr(parsed_payload, "model_dump"):
+                            parsed_payload = parsed_payload.model_dump()
+                        elif hasattr(parsed_payload, "dict"):
+                            parsed_payload = parsed_payload.dict()
+                    if isinstance(parsed_payload, dict):
+                        response_text = json.dumps(parsed_payload, ensure_ascii=False)
+                    else:
+                        response_text = response.text
 
                     # Track token usage (if available)
                     usage = getattr(response, "usage_metadata", None)
                     if usage is not None:
+                        prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
+                        candidates_tokens = getattr(usage, "candidates_token_count", 0) or 0
+                        thoughts_tokens = getattr(usage, "thoughts_token_count", 0) or 0
                         with self.lock:
-                            self.total_input_tokens += getattr(usage, "prompt_token_count", 0) or 0
-                            self.total_output_tokens += getattr(usage, "response_token_count", 0) or 0
+                            self.total_input_tokens += prompt_tokens
+                            self.total_output_tokens += candidates_tokens
+                            self.total_thought_tokens += thoughts_tokens
 
                     parsed_result = self.parse(item, response_text)
                     return parsed_result
@@ -269,7 +316,12 @@ class ConversationJudgeAbsolute:
             )
 
         # Print stats
-        print(f"\nToken usage: {self.total_input_tokens:,} input + {self.total_output_tokens:,} output = {self.total_input_tokens + self.total_output_tokens:,} total")
+        total = self.total_input_tokens + self.total_output_tokens + self.total_thought_tokens
+        print(
+            f"\nToken usage: {self.total_input_tokens:,} input + "
+            f"{self.total_output_tokens:,} output + "
+            f"{self.total_thought_tokens:,} thoughts = {total:,} total"
+        )
         if self.failed_items:
             print(f"Failed items: {len(self.failed_items)}")
 
@@ -278,6 +330,8 @@ class ConversationJudgeAbsolute:
 
 def parse_evaluation_json(evaluation_text):
     """Parse the JSON evaluation response and return a structured dictionary."""
+    if isinstance(evaluation_text, dict):
+        return evaluation_text
     try:
         # Try to parse the entire response as JSON
         evaluation_data = json.loads(evaluation_text)
@@ -377,15 +431,35 @@ def main(judge_model_name, target_model, num_conversations, temp_dir, max_worker
     all_scores = []
 
     # Process each result
+    parsed_count = 0
+    judgements = []
     for i, result in enumerate(results):
         print(f"\nProcessing result {i+1}/{len(results)}:")
 
         # Parse the evaluation
-        eval_data = parse_evaluation_json(result["evaluation"])
+        raw_evaluation = result.get("evaluation", "")
+        eval_data = parse_evaluation_json(raw_evaluation)
 
         if not eval_data:
             print(f"  Could not parse evaluation for conversation {i+1}")
+            judgements.append(
+                {
+                    "id": result.get("id", ""),
+                    "llm": result.get("llm", ""),
+                    "evaluation": None,
+                    "raw_evaluation": raw_evaluation,
+                }
+            )
             continue
+        parsed_count += 1
+        judgements.append(
+            {
+                "id": result.get("id", ""),
+                "llm": result.get("llm", ""),
+                "evaluation": eval_data,
+                "raw_evaluation": raw_evaluation,
+            }
+        )
 
         # Collect scores for each category
         for category in categories:
@@ -476,7 +550,7 @@ def main(judge_model_name, target_model, num_conversations, temp_dir, max_worker
         "category_averages": {},
         "overall_average": None,
         "sample_count": len(formatted_conversations),
-        "evaluated_count": sum(1 for cat in category_scores.values() if cat)
+        "evaluated_count": parsed_count,
     }
 
     # Add category averages
@@ -494,6 +568,13 @@ def main(judge_model_name, target_model, num_conversations, temp_dir, max_worker
         json.dump(scores_data, f, ensure_ascii=False, indent=2)
 
     print(f"\nResults saved to {scores_file}")
+
+    # Save per-conversation judgements (including judge reasoning) for inspection/reprocessing.
+    judgements_file = os.path.join(scores_dir, f"{safe_model_name}_rp_bench_judgements.jsonl")
+    with open(judgements_file, "w", encoding="utf-8") as f:
+        for record in judgements:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    print(f"Per-conversation judgements saved to {judgements_file}")
 
 
 if __name__ == "__main__":

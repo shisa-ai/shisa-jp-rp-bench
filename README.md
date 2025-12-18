@@ -1,7 +1,12 @@
 # Shisa-RP-Bench Readme 
 
-## Results save location: 
-scores/scores.jsonl
+## Results
+- Conversation generation: `conversations/<MODEL>_shisa-ai-shisa-rp-bench-testset.jsonl`
+- Absolute evaluation (Gemini judge via `judge_conversations.py`):
+  - `scores/<MODEL>_rp_bench_scores.json`
+  - `scores/<MODEL>_rp_bench_answers.jsonl`
+  - `scores/<MODEL>_rp_bench_judgements.jsonl`
+- Pairwise ranking pipeline (optional): `scores/scores.jsonl` (Bradley–Terry over comparisons)
 
 ## Overview
 
@@ -21,7 +26,7 @@ MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_j
 
 MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" JUDGE_MODEL="gemini/gemini-2.0-flash" JUDGE_URL="http://athenev2/v1" ./run_japanese_rp_bench.sh
 
-### With Low Context (If you need 8192 Context Length)
+### With Low Context (lower per-response token cap)
 LOW_CONTEXT="true" MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_japanese_rp_bench.sh
 
 Breakdown:
@@ -29,7 +34,8 @@ MODEL = Model name in standard format.
 OPENAI_URL = URL used by the model. (Probably localhost:8000/v1 in most cases, I assume)
 JUDGE_NAME = Name of the judge model. Defaults to Gemini 2.0 Flash in this repo. 
 JUDGE_URL = Judge API URL for any external judge endpoint (the default absolute evaluator uses the native Google Generative AI SDK with `GEMINI_API_KEY`). 
-LOW_CONTEXT= Forces the model to use 8192 context window. Off by default. 
+LOW_CONTEXT= Lowers per-response `max_tokens` from 1024 → 256 to help small-context models. Off by default.
+JP_RP_MAX_TOKENS= Optional env var override for conversation generation `max_tokens` (overrides both standard + low-context defaults). When using Google's OpenAI-compatible Gemini endpoint, use a larger value (e.g. 8192) to avoid empty outputs due to `max_tokens` being treated as total context.
 
 
 
