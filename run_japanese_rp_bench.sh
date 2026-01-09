@@ -54,10 +54,11 @@ envsubst < ./configs/simple_config.yaml > "${TEMP_DIR}/configs/temp_config.yaml"
 
 ###
 
-# log "Clearing curator cache before evaluation..."
-# rm -rf ~/.cache/curator 2>/dev/null || true
-export CURATOR_CACHE_DIR="${TEMP_DIR}/curator_cache"
-mkdir -p "$CURATOR_CACHE_DIR"
+# Setup curator cache only if we're running absolute eval
+if [ "$SKIP_ABSOLUTE_EVAL" != "true" ]; then
+    export CURATOR_CACHE_DIR="${TEMP_DIR}/curator_cache"
+    mkdir -p "$CURATOR_CACHE_DIR"
+fi
 
 # Run the benchmark
 if [ "$LOW_CONTEXT" = "true" ]; then
@@ -67,10 +68,14 @@ else
     japanese-rp-bench --config "${TEMP_DIR}/configs/temp_config.yaml"
 fi
 
-log "Running absolute evaluation with Gemini..."
-log "> CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py --judge-model-name gemini/gemini-2.0-flash --target-model $MODEL"
-CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py --judge-model-name gemini/gemini-2.0-flash --target-model "$MODEL"
-
+# Skip absolute evaluation if requested (multieval runner handles judging)
+if [ "$SKIP_ABSOLUTE_EVAL" != "true" ]; then
+    log "Running absolute evaluation with Gemini..."
+    log "> CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py --judge-model-name gemini/gemini-2.0-flash --target-model $MODEL"
+    CURATOR_DISABLE_CACHE=true python conversation_judge_absolute_evaluator.py --judge-model-name gemini/gemini-2.0-flash --target-model "$MODEL"
+else
+    log "Skipping absolute evaluation (SKIP_ABSOLUTE_EVAL=true)"
+fi
 
 # Clean up - we leave our temp folders for now...
 # rm ./configs/temp_config.yaml

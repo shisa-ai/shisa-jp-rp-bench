@@ -24,7 +24,7 @@ dependencies = [
     "transformers>=4.44.2",
     "google-generativeai>=0.8.1",
     "choix",
-    "bespokelabs-curator"
+    # "bespokelabs-curator"  # Removed: multieval uses OpenAI-compatible judging path
 ]
 
 [project.urls]
