@@ -26,9 +26,9 @@ def _schema_to_request_dict(schema: genai_types.Schema) -> dict:
 
     The Gemini REST API expects Schema fields in lowerCamelCase (protobuf JSON
     encoding). Some google-genai call paths have been observed to serialize
-    nested Schema objects with snake_case field names (e.g. `additional_properties`),
-    which the API rejects with HTTP 400 INVALID_ARGUMENT. Passing a plain dict
-    using schema aliases avoids this.
+    nested Schema objects with snake_case field names, which the API rejects
+    with HTTP 400 INVALID_ARGUMENT. Passing a plain dict using schema aliases
+    avoids this.
     """
     from enum import Enum
 
@@ -47,7 +47,6 @@ def _schema_to_request_dict(schema: genai_types.Schema) -> dict:
 
 EVALUATION_SCHEMA = genai_types.Schema(
     type="object",
-    additional_properties=False,
     required=[
         "Evaluation Reason",
         "Roleplay Adherence",
