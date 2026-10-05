@@ -13,6 +13,7 @@ import click
 
 from .artifacts import safe_name, score_paths
 from .utils import EVALUATION_CATEGORIES
+from .client import _validate_options, _validate_token_budget, validate_completion_policy
 
 
 def load_score_summary(path, model, judge, expected_count):
@@ -55,9 +56,29 @@ def atomic_copy(source, destination):
 @click.option('--output-dir', default='scores', type=click.Path(path_type=Path))
 @click.option('--base-url', help='OpenAI-compatible judge endpoint.')
 @click.option('--api-key-env', help='Environment variable containing the judge API key.')
+@click.option('--request-options', default='{}', help='JSON options passed to the judge endpoint')
+@click.option('--token-limit-ceiling', type=click.IntRange(min=1))
+@click.option('--max-token-retries', default=2, type=click.IntRange(min=0))
+@click.option('--strip-think-tags', is_flag=True)
+@click.option('--timeout', default=120.0, type=click.FloatRange(min=0, min_open=True))
+@click.option('--max-retries', default=2, type=click.IntRange(min=0))
+@click.option('--max-workers', default=10, type=click.IntRange(min=1))
 @click.option('--dataset', help='Scenario dataset repository or local JSON/JSONL file.')
-def main(judge_model, max_samples, conversations_dir, output_dir, base_url, api_key_env, dataset):
+def main(judge_model, max_samples, conversations_dir, output_dir, base_url, api_key_env, dataset,
+         request_options, token_limit_ceiling, max_token_retries, strip_think_tags, timeout, max_retries, max_workers):
     """Evaluate each conversation file with HTTPX and rank this batch's results."""
+    try:
+        options = json.loads(request_options)
+        _validate_options(options)
+        validate_completion_policy(token_limit_ceiling, max_token_retries, strip_think_tags)
+        budget_options = dict(options)
+        if 'max_tokens' not in options and 'max_completion_tokens' not in options:
+            budget_options['max_tokens'] = 8192
+        _validate_token_budget(budget_options, token_limit_ceiling)
+        if not math.isfinite(timeout):
+            raise ValueError('timeout must be finite')
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     if not conversations_dir.is_dir():
         raise click.ClickException(f"{conversations_dir} directory not found")
     files = sorted(conversations_dir.glob('*.jsonl'))
@@ -87,7 +108,13 @@ def main(judge_model, max_samples, conversations_dir, output_dir, base_url, api_
             command = [sys.executable, '-m', 'japanese_rp_bench', 'judge',
                        '--conversation-file', str(source.resolve()),
                        '--judge-model', judge_model, '--max-samples', str(count),
-                       '--output-dir', str(stage)]
+                       '--output-dir', str(stage), '--request-options', request_options,
+                       '--max-token-retries', str(max_token_retries), '--timeout', str(timeout),
+                       '--max-retries', str(max_retries), '--max-workers', str(max_workers)]
+            if token_limit_ceiling is not None:
+                command.extend(['--token-limit-ceiling', str(token_limit_ceiling)])
+            if strip_think_tags:
+                command.append('--strip-think-tags')
             for flag, value in (("--base-url", base_url), ("--api-key-env", api_key_env), ("--dataset", dataset)):
                 if value is not None:
                     command.extend([flag, value])

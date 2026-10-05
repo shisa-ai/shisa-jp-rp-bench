@@ -176,3 +176,39 @@ def test_batch_integrates_current_httpx_judge_and_artifacts(batch_workspace, mon
     assert json.loads(paths["judgements"].read_text())["evaluation"] == evaluation(4)
     assert requests[0]["model"] == "org/judge"
     assert "学校" in "\n".join(message["content"] for message in requests[0]["messages"])
+
+
+def test_batch_forwards_reasoning_and_budget_controls_to_real_judge(batch_workspace, monkeypatch):
+    import httpx
+    from japanese_rp_bench import models, judging
+    from japanese_rp_bench.client import ChatClient
+    source = source_file(batch_workspace, 'target')
+    row = json.loads(source.read_text()); row['settings'] = {'id': 0}
+    source.write_text(json.dumps(row) + '\n')
+    requests = []
+    def respond(request):
+        body = json.loads(request.content); requests.append(body)
+        if body['max_tokens'] == 8:
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'length', 'message': {'content': None, 'reasoning_content': 'thinking'}}]})
+        return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'content': '<think>trace</think>' + json.dumps(evaluation(4))}}]})
+    monkeypatch.setattr(models, 'ChatClient', lambda **kwargs: ChatClient(**kwargs, transport=httpx.MockTransport(respond)))
+    def subprocess_run(command, **kwargs):
+        result = CliRunner().invoke(judging.main, command[4:])
+        assert result.exit_code == 0, result.output
+        return subprocess.CompletedProcess(command, result.exit_code)
+    monkeypatch.setattr(batch.subprocess, 'run', subprocess_run)
+    result = CliRunner().invoke(batch.main, ['--judge-model', 'judge', '--request-options', '{"max_tokens":8,"enable_thinking":true}',
+        '--token-limit-ceiling', '16', '--max-token-retries', '1', '--strip-think-tags', '--timeout', '240', '--max-workers', '1'])
+    assert result.exit_code == 0, result.output
+    assert [r['max_tokens'] for r in requests] == [8, 16]
+    assert all(r['enable_thinking'] is True for r in requests)
+    saved = json.loads(score_paths('target', 'judge', batch_workspace / 'scores')['judgements'].read_text())
+    assert saved['evaluation'] == evaluation(4)
+    assert saved['completion']['reasoning'] == 'trace'
+
+
+@pytest.mark.parametrize('options', ['[]', '{bad', '{"max_tokens":0}'])
+def test_invalid_batch_request_options_do_not_publish_empty_rankings(batch_workspace, options):
+    result = CliRunner().invoke(batch.main, ['--judge-model', 'judge', '--request-options', options])
+    assert result.exit_code != 0
+    assert not list(batch_workspace.glob('model_rankings_*.csv'))

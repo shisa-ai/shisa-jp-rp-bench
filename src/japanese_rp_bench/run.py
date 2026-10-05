@@ -9,16 +9,26 @@ from pathlib import Path
 import httpx
 
 from japanese_rp_bench.artifacts import safe_name, write_jsonl as _write_jsonl
+from japanese_rp_bench.client import ChatError, validate_completion_policy
 from japanese_rp_bench.data import index_by_id, load_dataset_wrapper
-from japanese_rp_bench.models import create_client, generate_response
+from japanese_rp_bench.models import create_client, generate_completion
 from japanese_rp_bench.prompts import construct_system_prompts
 from japanese_rp_bench.utils import setup_logging
 
 
-CLIENT_FIELDS = {"model_name", "base_url", "api_key", "api_key_env", "timeout", "max_retries", "request_options"}
+CLIENT_FIELDS = {"model_name", "base_url", "api_key", "api_key_env", "timeout", "max_retries", "request_options", "token_limit_ceiling", "max_token_retries", "strip_think_tags"}
 CONFIG_FIELDS = {"dataset_repo", "dataset_split", "cache_dir", "max_turns", "max_workers", "max_samples", "output_dir"} | {
     f"{role}_{field}" for role in ("target", "user") for field in CLIENT_FIELDS
 }
+
+
+class GenerationError(ChatError):
+    """An API failure with the completed turns retained for diagnostics."""
+
+    def __init__(self, error, role, history, metadata):
+        super().__init__(str(error), status_code=error.status_code, completion=error.completion)
+        self.context = {"role": role, "history_index": len(history),
+                        "conversation_history": list(history), "generation_metadata": list(metadata)}
 
 
 def _positive_integer(value, name, minimum=1):
@@ -62,6 +72,12 @@ def _validate_config(config):
                 _positive_integer(options[token_field], f"{role}_{token_field}")
         if "max_tokens" in options and "max_completion_tokens" in options:
             raise ValueError(f"{role}_request_options must use only one token-limit field")
+        ceiling = config.get(f"{role}_token_limit_ceiling")
+        validate_completion_policy(ceiling, config.get(f"{role}_max_token_retries", 2),
+                                   config.get(f"{role}_strip_think_tags", False))
+        initial = options.get("max_completion_tokens", options.get("max_tokens", 1024))
+        if ceiling is not None and initial > ceiling:
+            raise ValueError(f"{role}_token_limit_ceiling must cover the initial token limit")
         timeout = config.get(f"{role}_timeout", 120)
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError(f"{role}_timeout must be a positive finite number")
@@ -91,6 +107,7 @@ def _client_options(config, role):
     return {key: config.get(f"{role}_{key}", default) for key, default in (
         ("base_url", None), ("api_key", None), ("api_key_env", None),
         ("timeout", 120), ("max_retries", 2), ("request_options", {}),
+        ("token_limit_ceiling", None), ("max_token_retries", 2), ("strip_think_tags", False),
     )}
 
 
@@ -98,18 +115,26 @@ def generate_conversation(test_case, idx, config, target_client, user_client, lo
     """The conversation loop shared by serial and threaded execution."""
     assistant_prompt, user_prompt, first_input = construct_system_prompts(test_case)
     history = [first_input]
+    metadata = []
+    def respond(client, role, prompt, messages):
+        try:
+            completion = generate_completion(client, config[f"{role}_model_name"], prompt, messages)
+        except ChatError as error:
+            raise GenerationError(error, role, history, metadata) from error
+        metadata.append({"role": role, "history_index": len(history), "completion": completion.metadata()})
+        history.append(completion.content)
     for turn in range(config["max_turns"]):
         logger.info("Processing test case %s, turn %s", idx + 1, turn + 1)
         if turn:
             user_messages = [{"role": "user", "content": "対話開始"}]
             user_messages.extend({"role": "assistant" if i % 2 == 0 else "user", "content": text}
                                  for i, text in enumerate(history))
-            history.append(generate_response(user_client, config["user_model_name"], user_prompt, user_messages))
+            respond(user_client, "user", user_prompt, user_messages)
         messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": text}
                     for i, text in enumerate(history)]
-        history.append(generate_response(target_client, config["target_model_name"], assistant_prompt, messages))
+        respond(target_client, "target", assistant_prompt, messages)
     return {"target_model_name": config["target_model_name"], "user_model_name": config["user_model_name"],
-            "id": test_case["id"], "conversation_history": history, "settings": dict(test_case)}
+            "id": test_case["id"], "conversation_history": history, "settings": dict(test_case), "generation_metadata": metadata}
 
 
 def conversation_output_path(config):
@@ -125,6 +150,8 @@ def conversation_output_path(config):
         identity[f"{role}_base_url"] = (config.get(f"{role}_base_url") or
             os.getenv("OPENAI_COMPATIBLE_API_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1")
         identity[f"{role}_request_options"] = config.get(f"{role}_request_options", {})
+        for key, default in (("token_limit_ceiling", None), ("max_token_retries", 2), ("strip_think_tags", False)):
+            identity[f"{role}_{key}"] = config.get(f"{role}_{key}", default)
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
     stem = f"{safe_name(config['target_model_name'])}_{safe_name(dataset_label)}__{digest}"
     return Path(config.get("output_dir", ".")) / "conversations" / f"{stem}.jsonl"
@@ -176,7 +203,13 @@ def generate_conversations(config) -> Path:
                 conversations[:] = [completed[key] for key in sorted(completed)]
             except Exception as error:
                 generation_errors.append(error)
-                failures.append({"stage": "generation", "id": test_case["id"], "error": type(error).__name__})
+                failure = {"stage": "generation", "id": test_case["id"], "error": type(error).__name__}
+                if isinstance(error, GenerationError):
+                    failure.update(error.context, error_detail=str(error))
+                if isinstance(error, ChatError) and error.completion is not None:
+                    failure.update(error_detail=str(error), completion=error.completion.metadata(),
+                                   partial_content=error.completion.content)
+                failures.append(failure)
             _write_jsonl(conversations_path, conversations)
             _write_jsonl(failures_path, failures)
         def generate(index, test_case):

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from japanese_rp_bench import run
+from japanese_rp_bench.client import Completion
 
 @pytest.fixture
 def scenario():
@@ -34,8 +35,8 @@ def prepare(monkeypatch, scenario):
     calls = []
     def generate(client, name, system, conversations, **kwargs):
         calls.append((name, copy.deepcopy(conversations), kwargs, system))
-        return "続けて" if name == "org/user" else "案内します"
-    monkeypatch.setattr(run, "generate_response", generate)
+        return Completion("続けて" if name == "org/user" else "案内します")
+    monkeypatch.setattr(run, "generate_completion", generate)
     return calls
 
 
@@ -65,6 +66,7 @@ def failure_path():
 def test_conversation_generation_alternates_character_roles(monkeypatch, config, scenario):
     calls = prepare(monkeypatch, scenario)
     result = run.generate_conversation(scenario, 0, config, "target", "user", logging.getLogger("test"))
+    result.pop("generation_metadata")  # Diagnostics are checked at the HTTP boundary in test_reasoning.
     assert result == {"id": "scene-1", "target_model_name": "org/target", "user_model_name": "org/user",
                       "conversation_history": ["こんにちは", "案内します", "続けて", "案内します"], "settings": scenario}
     assert calls[0][1] == [{"role": "user", "content": "こんにちは"}]
@@ -102,7 +104,7 @@ def test_generation_preserves_dataset_order(monkeypatch, config, scenario, worke
     assert [row["id"] for row in read_jsonl(conversation_path())] == ["b", "a"]
 
 
-@pytest.mark.parametrize("failure_at", ["load_dataset_wrapper", "create_client", "generate_response"])
+@pytest.mark.parametrize("failure_at", ["load_dataset_wrapper", "create_client", "generate_completion"])
 def test_dependency_failures_are_propagated(monkeypatch, config, scenario, failure_at):
     prepare(monkeypatch, scenario)
     make_output_dirs()
@@ -178,7 +180,7 @@ def test_clients_close_on_failure(monkeypatch, config, scenario, failure):
     def fail(*args, **kwargs):
         raise RuntimeError("inference failed")
     if failure == "generate":
-        monkeypatch.setattr(run, "generate_response", fail)
+        monkeypatch.setattr(run, "generate_completion", fail)
     with pytest.raises(RuntimeError):
         run.generate_conversations(config)
     assert clients
@@ -241,8 +243,8 @@ def test_partial_generation_failure_retains_other_completed_cases(monkeypatch, c
     def generate(*args, **kwargs):
         if args[3][0]["content"] == "fail":
             raise RuntimeError("request failed")
-        return "success"
-    monkeypatch.setattr(run, "generate_response", generate)
+        return Completion("success")
+    monkeypatch.setattr(run, "generate_completion", generate)
     with pytest.raises(RuntimeError, match="request failed"):
         run.generate_conversations(config)
     assert [item["id"] for item in read_jsonl(conversation_path())] == ["good"]
@@ -329,9 +331,9 @@ def test_parallel_checkpoints_completed_cases_before_slow_first_case(monkeypatch
     def generate(*args, **kwargs):
         if args[3][0]["content"] == "slow" and not checkpoint_saved.wait(timeout=2):
             raise RuntimeError("Completed fast case was not checkpointed")
-        return "response"
+        return Completion("response")
     monkeypatch.setattr(run, "_write_jsonl", write)
-    monkeypatch.setattr(run, "generate_response", generate)
+    monkeypatch.setattr(run, "generate_completion", generate)
     run.generate_conversations(config)
     assert checkpoint_saved.is_set()
     assert [record["id"] for record in read_jsonl(conversation_path())] == ["slow", "fast"]
@@ -377,7 +379,7 @@ def test_client_close_failure_does_not_mask_generation_failure_or_skip_other_cli
     user = Mock()
     user.close.side_effect = RuntimeError("sensitive cleanup details")
     monkeypatch.setattr(run, "create_client", Mock(side_effect=[target, user]))
-    monkeypatch.setattr(run, "generate_response", Mock(side_effect=RuntimeError("generation unavailable")))
+    monkeypatch.setattr(run, "generate_completion", Mock(side_effect=RuntimeError("generation unavailable")))
     with pytest.raises(RuntimeError, match="generation unavailable"):
         run.generate_conversations(config)
     target.close.assert_called_once_with()
@@ -415,7 +417,7 @@ def test_explicit_role_key_takes_precedence_over_missing_named_environment(monke
     prepare(monkeypatch, scenario)
     # Use the real client creation and inference functions at the HTTP boundary.
     monkeypatch.setattr(run, "create_client", models.create_client)
-    monkeypatch.setattr(run, "generate_response", models.generate_response)
+    monkeypatch.setattr(run, "generate_completion", models.generate_completion)
     monkeypatch.delenv("RUNNER_ABSENT_AUTH_ENV", raising=False)
     config.update(max_turns=2)
     config[f"{role}_api_key"] = "explicit-role-key"

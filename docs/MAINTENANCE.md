@@ -17,10 +17,14 @@ Direct runtime dependencies are HTTPX, datasets, Click, and PyYAML. Dataset load
 
 Tests use HTTPX MockTransport, real temporary files, and actual CLI/artifact processing. An offline socket guard fails a test even when application code catches the attempted connection. CI tests Python 3.10 and 3.13 with a 95% combined statement/branch coverage floor.
 
-**Verification (2026-10-05): 322 tests passed, zero failures or expected failures, with 96.96% combined statement/branch coverage.** The installed wheel passed all CLI help entrypoints, batch/score commands outside the checkout, packaged-rubric checks, and `pip check`. Independent review found no additional actionable interface defects. The archive hashes and `git diff --check` also passed. No new live model requests were made.
+**Thinking support verification (2026-10-05): 373 tests passed, zero failures or expected failures, with 97.13% combined statement/branch coverage.** Tests cover separate reasoning/final answers, bounded token-budget retries, provider controls, truncated-response rejection, concurrent calls, CLI forwarding, and diagnostics retained after later-turn failures. The rebuilt wheel passed new judge/batch CLI option checks, reasoning extraction and budget retry checks, and a packaged-rubric check outside the checkout. Independent reviews found later-turn diagnostics loss and missing token accounting for malformed responses; regression tests cover both fixes.
+
+Two tiny live Shisa requests, one each to `qwen3.8-27b` and `glm-5.2`, returned complete final answers with reasoning stored separately and backend-default reasoning preserved. These are integration checks, not a new benchmark. The local artifact is `results/thinking-support-smoke-2026-10-05.json`; existing preliminary rankings were not rewritten.
+
+The preceding cleanup verification passed 322 tests with 96.96% coverage, all CLI help entrypoints, installed-wheel batch/score commands, packaged-rubric checks, `pip check`, archive hashes, and `git diff --check`. That cleanup verification was offline.
 
 ## Historical evidence
 
 Previous reviews, implementation plans, validation reports, historical datasets/results/prompts, and live-test output were preserved outside the active checkout at the sibling directory `../shisa-jp-rp-bench-history-2026-10-05/`. Its `preservation-manifest.json` records paths, sizes, and SHA-256 hashes; all 28 source files were verified after moving. This local history directory is not part of the repository.
 
-The earlier live integration used `shisa-ai/shisa-v2.1-llama3.3-70b` to generate one two-turn scenario and `glm-5.2` to judge it on `https://api.shisa.ai/openai/v1`. One of one judgments passed the schema with zero failures. It was an integration test, not a statistical benchmark. Credentials were not retained. The current cleanup is verified offline; no new paid requests or dataset uploads are needed.
+The earlier live integration used `shisa-ai/shisa-v2.1-llama3.3-70b` to generate one two-turn scenario and `glm-5.2` to judge it on `https://api.shisa.ai/openai/v1`. One of one judgments passed the schema with zero failures. It was an integration test, not a statistical benchmark. Credentials were not retained.

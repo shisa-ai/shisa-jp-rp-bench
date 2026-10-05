@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from japanese_rp_bench import models
-from japanese_rp_bench.client import ChatClient
+from japanese_rp_bench.client import ChatClient, Completion
 
 
 def test_create_configured_httpx_client(monkeypatch):
@@ -17,7 +17,7 @@ def test_create_configured_httpx_client(monkeypatch):
     monkeypatch.setenv('TEST_ROLE_KEY', 'role-secret')
     client = models.create_client(base_url='https://example.test/v1', api_key_env='TEST_ROLE_KEY', timeout=12, max_retries=1, request_options={'max_tokens': 32})
     assert client is not None
-    assert created == [((), {'base_url':'https://example.test/v1','api_key':'role-secret','timeout':12,'max_retries':1,'default_options':{'max_tokens':32}})]
+    assert created == [((), {'base_url':'https://example.test/v1','api_key':'role-secret','timeout':12,'max_retries':1,'default_options':{'max_tokens':32},'token_limit_ceiling':None,'max_token_retries':2,'strip_think_tags':False})]
 
 
 def test_explicit_api_key_and_environment_fallbacks(monkeypatch):
@@ -63,7 +63,7 @@ def test_generation_sends_full_message_history():
 
 def test_model_options_control_token_field_without_name_guessing(monkeypatch):
     captured = []
-    client = SimpleNamespace(default_options={'max_completion_tokens':1234,'temperature':1}, complete=lambda *args,**kwargs: captured.append(kwargs) or 'response')
+    client = SimpleNamespace(default_options={'max_completion_tokens':1234,'temperature':1}, complete_with_details=lambda *args,**kwargs: captured.append(kwargs) or Completion('response'))
     models.generate_response(client,'o1-anything','s',[{'role':'user','content':'u'}])
     assert captured == [{'max_completion_tokens':1234,'temperature':1}]
     monkeypatch.setenv('JP_RP_MAX_TOKENS','55')

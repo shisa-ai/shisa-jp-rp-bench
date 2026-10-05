@@ -6,7 +6,7 @@ from pathlib import Path
 
 import click
 
-from .client import ChatError, _validate_options
+from .client import ChatError, _validate_options, _validate_token_budget
 from .artifacts import score_paths, write_json, write_jsonl
 from .data import index_by_id, normalize_id, load_dataset_wrapper
 from .models import create_client
@@ -98,6 +98,7 @@ def judge_conversations(records, *, client, judge_model, output_dir="scores", ma
     if "max_tokens" not in options and "max_completion_tokens" not in options:
         options["max_tokens"] = 8192
     _validate_options(options)
+    _validate_token_budget(options, getattr(client, "token_limit_ceiling", None))
     paths = score_paths(model_name, judge_model, output_dir)
     write_json(paths["scores"], {"model_name": model_name, "judge_model_name": judge_model,
                                "category_averages": dict.fromkeys(EVALUATION_CATEGORIES), "overall_average": None,
@@ -117,10 +118,15 @@ def judge_conversations(records, *, client, judge_model, output_dir="scores", ma
         else:
             messages = [{"role": "system", "content": rubric}, {"role": "user", "content": record["formatted_data"]}]
         try:
-            raw = client.complete(judge_model, messages, **options)
+            completion = client.complete_with_details(judge_model, messages, **options)
+            judgement["completion"] = completion.metadata()
+            raw = completion.content
             judgement["raw_evaluation"] = raw
             judgement["evaluation"] = parse_evaluation(raw)
         except Exception as exc:
+            if isinstance(exc, ChatError) and exc.completion is not None:
+                judgement["completion"] = exc.completion.metadata()
+                judgement["raw_evaluation"] = exc.completion.content or None
             judgement["error"] = str(exc) if isinstance(exc, ChatError) else f"{type(exc).__name__}: judging failed; raw response retained when available"
         return judgement
 
@@ -154,10 +160,14 @@ def judge_conversations(records, *, client, judge_model, output_dir="scores", ma
 @click.option("--api-key-env")
 @click.option("--timeout", default=120.0, type=click.FloatRange(min=0, min_open=True))
 @click.option("--max-retries", default=2, type=click.IntRange(min=0))
+@click.option("--token-limit-ceiling", type=click.IntRange(min=1), help="Opt in to bounded token-budget growth on truncation")
+@click.option("--max-token-retries", default=2, type=click.IntRange(min=0))
+@click.option("--strip-think-tags", is_flag=True, help="Extract leading inline <think> blocks")
 @click.option("--cache-dir", type=click.Path(file_okay=False))
 @click.option("--request-options", default="{}", help="JSON object of endpoint-specific generation options")
 def main(judge_model, conversation_file, max_samples, dataset_path, prompt_file, output_dir,
-         max_workers, base_url, api_key, api_key_env, timeout, max_retries, cache_dir, request_options):
+         max_workers, base_url, api_key, api_key_env, timeout, max_retries, cache_dir, request_options,
+         token_limit_ceiling, max_token_retries, strip_think_tags):
     """Judge roleplay conversations through an OpenAI-compatible HTTP endpoint."""
     client = None
     try:
@@ -168,7 +178,9 @@ def main(judge_model, conversation_file, max_samples, dataset_path, prompt_file,
             raise ValueError("request-options cannot override model, messages, or stream")
         records = prepare_conversations(conversation_file, dataset_path=dataset_path, max_samples=max_samples, cache_dir=cache_dir)
         rubric = Path(prompt_file).read_text(encoding="utf-8") if prompt_file else None
-        client = create_client(base_url=base_url, api_key=api_key, api_key_env=api_key_env, timeout=timeout, max_retries=max_retries)
+        client = create_client(base_url=base_url, api_key=api_key, api_key_env=api_key_env, timeout=timeout, max_retries=max_retries,
+                               token_limit_ceiling=token_limit_ceiling, max_token_retries=max_token_retries,
+                               strip_think_tags=strip_think_tags)
         summary = judge_conversations(records, client=client, judge_model=judge_model,
                                       output_dir=output_dir, max_workers=max_workers, prompt_template=rubric, request_options=options)
         click.echo(json.dumps(summary, ensure_ascii=False, allow_nan=False))
