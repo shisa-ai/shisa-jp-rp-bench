@@ -1,419 +1,208 @@
-import argparse
+"""Generate roleplay conversations through authenticated HTTP clients."""
+import hashlib
 import json
+import math
 import os
-from multiprocessing import Pool, cpu_count
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
-import yaml
-from tqdm import tqdm
+import httpx
 
-from japanese_rp_bench.data import load_dataset_wrapper
-from japanese_rp_bench.evaluation import evaluate_conversation
-from japanese_rp_bench.models import generate_response, load_model
+from japanese_rp_bench.artifacts import safe_name, write_jsonl as _write_jsonl
+from japanese_rp_bench.data import index_by_id, load_dataset_wrapper
+from japanese_rp_bench.models import create_client, generate_response
 from japanese_rp_bench.prompts import construct_system_prompts
-from japanese_rp_bench.utils import (
-    extract_and_escape_json_string,
-    is_valid_evaluation,
-    setup_logging,
-)
+from japanese_rp_bench.utils import setup_logging
 
 
-def process_parallel(test_case, idx, config, target_model, target_tokenizer, user_model, user_tokenizer, logger):
-    logger.info(f"Processing test case {idx + 1}")
-    assistant_system_prompt, user_system_prompt, first_user_input = construct_system_prompts(test_case)
-    conversation_history = [first_user_input]
-
-    # ステップ5: max_turns分対話を生成するループ
-    for turn in range(config["max_turns"]):
-        logger.info(f"Test case {idx + 1}, Turn {turn + 1}/{config['max_turns']}")
-        # 最初のターンは既定のユーザー入力からアシスタントの応答のみを生成
-        if turn == 0:
-            conversations = [{"role": "user", "content": first_user_input}]
-            logger.info("Generating initial assistant response...")
-            assistant_response = generate_response(
-                target_model,
-                target_tokenizer,
-                config["target_model_name"],
-                config["target_inference_method"],
-                assistant_system_prompt,
-                conversations,
-                low_context=config.get("low_context", False),
-                ultra_low_context=config.get("ultra_low_context", False),
-            )
-            conversation_history.append(assistant_response)
-        # 2ターン目以降はユーザー入力とアシスタントの応答の両方を生成
-        else:
-            # まず、次のユーザーの入力を生成
-            conversations = [{"role": "user", "content": "対話開始"}]
-            for i, conversation in enumerate(conversation_history):
-                if i % 2 == 0:
-                    conversations.append(
-                        {"role": "assistant", "content": conversation}
-                    )
-                else:
-                    conversations.append({"role": "user", "content": conversation})
-            user_input = generate_response(
-                user_model,
-                user_tokenizer,
-                config["user_model_name"],
-                config["user_inference_method"],
-                user_system_prompt,
-                conversations,
-                low_context=config.get("low_context", False),
-                ultra_low_context=config.get("ultra_low_context", False),
-            )
-            conversation_history.append(user_input)
-            # 次に、アシスタント側の応答を生成
-            conversations = []
-            for i, conversation in enumerate(conversation_history):
-                if i % 2 == 0:
-                    conversations.append({"role": "user", "content": conversation})
-                else:
-                    conversations.append(
-                        {"role": "assistant", "content": conversation}
-                    )
-            assistant_response = generate_response(
-                target_model,
-                target_tokenizer,
-                config["target_model_name"],
-                config["target_inference_method"],
-                assistant_system_prompt,
-                conversations,
-                low_context=config.get("low_context", False),
-                ultra_low_context=config.get("ultra_low_context", False),
-            )
-            conversation_history.append(assistant_response)
-
-    return {
-        "target_model_name": config["target_model_name"],
-        "user_model_name": config["user_model_name"],
-        "id": test_case["id"],
-        "conversation_history": conversation_history,
-    }
+CLIENT_FIELDS = {"model_name", "base_url", "api_key", "api_key_env", "timeout", "max_retries", "request_options"}
+CONFIG_FIELDS = {"dataset_repo", "dataset_split", "cache_dir", "max_turns", "max_workers", "max_samples", "output_dir"} | {
+    f"{role}_{field}" for role in ("target", "user") for field in CLIENT_FIELDS
+}
 
 
-def run_eval(config) -> None:
-    logger = setup_logging()
-    logger.info("処理を開始")
-    # ステップ1: データセットの読み込み
-    logger.info(f"データセットの読み込み: {config['dataset_repo']}, split: {config['dataset_split']}")
-    try:
-        dataset = load_dataset_wrapper(
-            config["dataset_repo"],
-            split=config["dataset_split"],
-            cache_dir=config["cache_dir"],
-        )
-    except Exception as e:
-        logger.exception("データセットの読み込み中にエラーが発生しました")
-        raise e
+def _positive_integer(value, name, minimum=1):
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+    return value
 
-    # ステップ2: 各モデルの読み込み
-    logger.info("各モデルの読み込み")
-    try:
-        target_model, target_tokenizer = load_model(
-            config["target_model_name"],
-            config["target_inference_method"],
-            config["tensor_parallel_size"],
-            config["cache_dir"],
-        )
-        user_model, user_tokenizer = load_model(
-            config["user_model_name"],
-            config["user_inference_method"],
-            config["tensor_parallel_size"],
-            config["cache_dir"],
-        )
-        if not config.get("no_judge", False):
-            judge_models = []
-            for judge_model_name, judge_inference_method in zip(
-                config["judge_model_names"], config["judge_inference_methods"]
-            ):
-                judge_model, judge_tokenizer = load_model(
-                    judge_model_name,
-                    judge_inference_method,
-                    config["tensor_parallel_size"],
-                    config["cache_dir"],
-                )
-                judge_models.append(
-                    (judge_model, judge_tokenizer, judge_model_name, judge_inference_method)
-                )
-    except Exception as e:
-        logger.exception("モデルの読み込み中にエラーが発生しました")
-        raise e
 
-    # ステップ3: 評価プロンプトの読み込み
-    if not config.get("no_judge", False):
-        logger.info(f"評価プロンプトの読み込み: {config['evaluation_prompt_file']}")
+def _validate_config(config):
+    if not isinstance(config, dict):
+        raise ValueError("configuration must be a mapping")
+    config = dict(config)
+    unknown = set(config) - CONFIG_FIELDS
+    if unknown:
+        fields = ", ".join(sorted(str(field) for field in unknown))
+        raise ValueError(f"Unknown configuration fields: {fields}")
+    for name in ("dataset_repo", "target_model_name", "user_model_name"):
+        if not isinstance(config.get(name), str) or not config[name].strip():
+            raise ValueError(f"{name} must be a nonempty string")
+    for name, default in (("max_turns", 5), ("max_workers", 1)):
+        config[name] = _positive_integer(config.get(name, default), name)
+    if config.get("max_samples") is not None:
+        _positive_integer(config["max_samples"], "max_samples")
+    config.setdefault("dataset_split", "train")
+    config.setdefault("cache_dir", None)
+    config.setdefault("output_dir", ".")
+    if not isinstance(config["output_dir"], str) or not config["output_dir"]:
+        raise ValueError("output_dir must be a nonempty path string")
+    for role in ("target", "user"):
+        options = config.get(f"{role}_request_options", {})
+        if not isinstance(options, dict):
+            raise ValueError(f"{role}_request_options must be a mapping")
+        if {"model", "messages", "stream", "api_key", "authorization", "headers", "base_url"} & options.keys():
+            raise ValueError(f"{role}_request_options cannot override routing/authentication fields")
         try:
-            with open(config["evaluation_prompt_file"], "r", encoding="utf-8") as f:
-                evaluation_prompt = f.read()
-        except Exception as e:
-            logger.exception("評価プロンプトの読み込み中にエラーが発生しました")
-            raise e
+            json.dumps(options, allow_nan=False)
+        except (ValueError, TypeError):
+            raise ValueError(f"{role}_request_options must contain finite JSON values") from None
+        for token_field in ("max_tokens", "max_completion_tokens"):
+            if token_field in options:
+                _positive_integer(options[token_field], f"{role}_{token_field}")
+        if "max_tokens" in options and "max_completion_tokens" in options:
+            raise ValueError(f"{role}_request_options must use only one token-limit field")
+        timeout = config.get(f"{role}_timeout", 120)
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(f"{role}_timeout must be a positive finite number")
+        _positive_integer(config.get(f"{role}_max_retries", 2), f"{role}_max_retries", 0)
+        for suffix in ("base_url", "api_key", "api_key_env"):
+            value = config.get(f"{role}_{suffix}")
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{role}_{suffix} must be a nonempty string")
+        endpoint = config.get(f"{role}_base_url")
+        if endpoint is not None:
+            try:
+                url = httpx.URL(endpoint)
+            except (httpx.InvalidURL, TypeError):
+                raise ValueError(f"{role}_base_url must be a valid HTTP(S) URL") from None
+            if url.scheme not in ("http", "https") or not url.host or url.userinfo or url.query or url.fragment:
+                raise ValueError(f"{role}_base_url must be HTTP(S), without credentials, query or fragment")
+        key = config.get(f"{role}_api_key")
+        if key is not None and ("\n" in key or "\r" in key):
+            raise ValueError(f"{role}_api_key must be a single-line string")
+        key_env = config.get(f"{role}_api_key_env")
+        if key is None and key_env and not os.getenv(key_env):
+            raise ValueError(f"Required API key environment variable {key_env} is not set")
+    return config
 
-    all_conversations = []
-    all_evaluations = []
 
-    # ステップ4: 評価データセットごとに処理
-    logger.info("各評価データに対する処理を開始（推論+評価）")
-    
-    if config["target_inference_method"] == "openai_compatible_api":
-        # Use parallel processing for OpenAI API
-        with ThreadPoolExecutor(max_workers=15) as executor:
-            futures = []
+def _client_options(config, role):
+    return {key: config.get(f"{role}_{key}", default) for key, default in (
+        ("base_url", None), ("api_key", None), ("api_key_env", None),
+        ("timeout", 120), ("max_retries", 2), ("request_options", {}),
+    )}
+
+
+def generate_conversation(test_case, idx, config, target_client, user_client, logger):
+    """The conversation loop shared by serial and threaded execution."""
+    assistant_prompt, user_prompt, first_input = construct_system_prompts(test_case)
+    history = [first_input]
+    for turn in range(config["max_turns"]):
+        logger.info("Processing test case %s, turn %s", idx + 1, turn + 1)
+        if turn:
+            user_messages = [{"role": "user", "content": "対話開始"}]
+            user_messages.extend({"role": "assistant" if i % 2 == 0 else "user", "content": text}
+                                 for i, text in enumerate(history))
+            history.append(generate_response(user_client, config["user_model_name"], user_prompt, user_messages))
+        messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": text}
+                    for i, text in enumerate(history)]
+        history.append(generate_response(target_client, config["target_model_name"], assistant_prompt, messages))
+    return {"target_model_name": config["target_model_name"], "user_model_name": config["user_model_name"],
+            "id": test_case["id"], "conversation_history": history, "settings": dict(test_case)}
+
+
+def conversation_output_path(config):
+    """Return the collision-safe generated artifact path without running inference."""
+    source = config["dataset_repo"]
+    local = Path(source).is_file()
+    dataset_identity = str(Path(source).resolve()) if local else source
+    dataset_label = Path(source).stem if local else source
+    identity = {"target": config["target_model_name"], "user": config["user_model_name"],
+                "dataset": dataset_identity, "split": config.get("dataset_split", "train"),
+                "max_turns": config.get("max_turns", 5), "max_samples": config.get("max_samples")}
+    for role in ("target", "user"):
+        identity[f"{role}_base_url"] = (config.get(f"{role}_base_url") or
+            os.getenv("OPENAI_COMPATIBLE_API_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1")
+        identity[f"{role}_request_options"] = config.get(f"{role}_request_options", {})
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+    stem = f"{safe_name(config['target_model_name'])}_{safe_name(dataset_label)}__{digest}"
+    return Path(config.get("output_dir", ".")) / "conversations" / f"{stem}.jsonl"
+
+
+def generate_conversations(config) -> Path:
+    """Generate, checkpoint, and return a conversation JSONL artifact path."""
+    config = _validate_config(config)
+    logger = setup_logging()
+    dataset = list(load_dataset_wrapper(config["dataset_repo"], split=config["dataset_split"], cache_dir=config["cache_dir"]))
+    index_by_id(dataset, label="scenarios")
+    if not dataset:
+        raise ValueError("Dataset must contain at least one scenario")
+    if config.get("max_samples") is not None:
+        dataset = dataset[:config["max_samples"]]
+    for test_case in dataset:
+        try:
+            json.dumps(test_case, allow_nan=False)
+        except (ValueError, TypeError):
+            raise ValueError("Every scenario must contain finite JSON values") from None
+        fields = ("tag", "genre", "world_setting", "scene_setting", "user_setting",
+                  "assistant_setting", "dialogue_tone", "response_format", "first_user_input")
+        if any(not isinstance(test_case.get(field), str) for field in fields):
+            raise ValueError("Every scenario requires string roleplay settings and first_user_input")
+        if not test_case["first_user_input"].strip():
+            raise ValueError("Every scenario requires a nonempty first_user_input")
+        construct_system_prompts(test_case)
+    conversations_path = conversation_output_path(config)
+    failures_path = Path(config["output_dir"]) / "generation_failures" / conversations_path.name
+    for path in (conversations_path, failures_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    clients = []
+    conversations, failures = [], []
+    try:
+        def create(role):
+            client = create_client(**_client_options(config, role))
+            clients.append(client)
+            return client
+        target = create("target")
+        user = create("user")
+        # Clear prior run artifacts only after setup has succeeded.
+        _write_jsonl(conversations_path, [])
+        _write_jsonl(failures_path, [])
+        generation_errors = []
+        completed = {}
+        def consume(index, test_case, operation):
+            try:
+                completed[index] = operation()
+                conversations[:] = [completed[key] for key in sorted(completed)]
+            except Exception as error:
+                generation_errors.append(error)
+                failures.append({"stage": "generation", "id": test_case["id"], "error": type(error).__name__})
+            _write_jsonl(conversations_path, conversations)
+            _write_jsonl(failures_path, failures)
+        def generate(index, test_case):
+            return generate_conversation(test_case, index, config, target, user, logger)
+        if config["max_workers"] == 1:
             for idx, test_case in enumerate(dataset):
-                future = executor.submit(
-                    process_parallel,
-                    test_case,
-                    idx,
-                    config,
-                    target_model,
-                    target_tokenizer,
-                    user_model,
-                    user_tokenizer,
-                    logger
-                )
-                futures.append(future)
-            
-            for future in tqdm(futures, total=len(dataset)):
-                result = future.result()
-                all_conversations.append(result)
-    else:
-        for idx, test_case in enumerate(tqdm(dataset)):
-            logger.info(f"Processing test case {idx + 1}/{len(dataset)}")
-            assistant_system_prompt, user_system_prompt, first_user_input = (
-                construct_system_prompts(test_case)
-            )
-            # conversation_historyはlist of strとして持っておき、推論の際にconversationsとして再構築する
-            conversation_history = [first_user_input]
-
-            # ステップ5: max_turns分対話を生成するループ
-            for turn in range(config["max_turns"]):
-                logger.info(f"Test case {idx + 1}, Turn {turn + 1}/{config['max_turns']}")
-                # 最初のターンは既定のユーザー入力からアシスタントの応答のみを生成
-                if turn == 0:
-                    conversations = [{"role": "user", "content": first_user_input}]
-                    logger.info("Generating initial assistant response...")
-                    assistant_response = generate_response(
-                        target_model,
-                        target_tokenizer,
-                        config["target_model_name"],
-                        config["target_inference_method"],
-                        assistant_system_prompt,
-                        conversations,
-                        low_context=config.get("low_context", False),
-                        ultra_low_context=config.get("ultra_low_context", False),
-                    )
-                    conversation_history.append(assistant_response)
-                # 2ターン目以降はユーザー入力とアシスタントの応答の両方を生成
-                else:
-                    # まず、次のユーザーの入力を生成
-                    conversations = [{"role": "user", "content": "対話開始"}]
-                    for i, conversation in enumerate(conversation_history):
-                        if i % 2 == 0:
-                            conversations.append(
-                                {"role": "assistant", "content": conversation}
-                            )
-                        else:
-                            conversations.append({"role": "user", "content": conversation})
-                    user_input = generate_response(
-                        user_model,
-                        user_tokenizer,
-                        config["user_model_name"],
-                        config["user_inference_method"],
-                        user_system_prompt,
-                        conversations,
-                        low_context=config.get("low_context", False),
-                        ultra_low_context=config.get("ultra_low_context", False),
-                    )
-                    conversation_history.append(user_input)
-                    # 次に、アシスタント側の応答を生成
-                    conversations = []
-                    for i, conversation in enumerate(conversation_history):
-                        if i % 2 == 0:
-                            conversations.append({"role": "user", "content": conversation})
-                        else:
-                            conversations.append(
-                                {"role": "assistant", "content": conversation}
-                            )
-                    assistant_response = generate_response(
-                        target_model,
-                        target_tokenizer,
-                        config["target_model_name"],
-                        config["target_inference_method"],
-                        assistant_system_prompt,
-                        conversations,
-                        low_context=config.get("low_context", False),
-                        ultra_low_context=config.get("ultra_low_context", False),
-                    )
-                    conversation_history.append(assistant_response)
-
-            # ステップ6: 対話データの保存
-            conversation_id = test_case["id"]
-            all_conversations.append(
-                {
-                    "target_model_name": config["target_model_name"],
-                    "user_model_name": config["user_model_name"],
-                    "id": conversation_id,
-                    "conversation_history": conversation_history,
-                }
-            )
-
-            # Skip judging if no_judge is True
-            if config.get("no_judge", False):
+                consume(idx, test_case, lambda idx=idx, test_case=test_case: generate(idx, test_case))
+        else:
+            with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
+                futures = {executor.submit(generate, idx, case): (idx, case)
+                           for idx, case in enumerate(dataset)}
+                for future in as_completed(futures):
+                    idx, test_case = futures[future]
+                    consume(idx, test_case, future.result)
+        if generation_errors:
+            raise generation_errors[0]
+        return conversations_path
+    finally:
+        closed = set()
+        for client in reversed(clients):
+            if id(client) in closed:
                 continue
-
-            # ステップ7: 複数モデルによる評価の実行
-            individual_evaluations = []
-            total_scores = {
-                "Roleplay Adherence": 0,
-                "Consistency": 0,
-                "Contextual Understanding": 0,
-                "Expressiveness": 0,
-                "Creativity": 0,
-                "Naturalness of Japanese": 0,
-                "Enjoyment of the Dialogue": 0,
-                "Appropriateness of Turn-Taking": 0,
-            }
-
-            logger.info(f"Test case {idx + 1}: Running evaluation with {len(judge_models)} judge models")
-            for judge_idx, (judge_model, judge_tokenizer, judge_model_name, judge_inference_method) in enumerate(judge_models):
-                logger.info(f"Running evaluation with judge model {judge_idx + 1}: {judge_model_name}")
-                while True:
-                    evaluation_result = evaluate_conversation(
-                        judge_model,
-                        judge_tokenizer,
-                        judge_model_name,
-                        judge_inference_method,
-                        evaluation_prompt,
-                        assistant_system_prompt,
-                        conversation_history,
-                    )
-
-                    # json部分を探す
-                    try:
-                        extracted_json = extract_and_escape_json_string(evaluation_result)
-                    except IndexError:
-                        logger.exception(
-                            f"No JSON object found in evaluation result for ID {conversation_id} with judge model {judge_model_name}, retrying..."
-                        )
-                        continue
-
-                    # jsonとしてロード
-                    try:
-                        evaluation = json.loads(extracted_json)
-                    except json.JSONDecodeError:
-                        logger.exception(
-                            f"Invalid JSON format in evaluation result for ID {conversation_id} with judge model {judge_model_name}, retrying..."
-                        )
-                        continue
-
-                    # jsonの形式が指定のものかをチェック
-                    if is_valid_evaluation(evaluation):
-                        logger.info(f"Valid evaluation received from {judge_model_name}")
-                        break
-                    else:
-                        logger.exception(
-                            f"Invalid evaluation structure in evaluation result for ID {conversation_id} with judge model {judge_model_name}, retrying..."
-                        )
-
-                evaluation_entry = {
-                    "Evaluation Reason": evaluation["Evaluation Reason"],
-                    "Roleplay Adherence": evaluation["Roleplay Adherence"],
-                    "Consistency": evaluation["Consistency"],
-                    "Contextual Understanding": evaluation["Contextual Understanding"],
-                    "Expressiveness": evaluation["Expressiveness"],
-                    "Creativity": evaluation["Creativity"],
-                    "Naturalness of Japanese": evaluation["Naturalness of Japanese"],
-                    "Enjoyment of the Dialogue": evaluation["Enjoyment of the Dialogue"],
-                    "Appropriateness of Turn-Taking": evaluation[
-                        "Appropriateness of Turn-Taking"
-                    ],
-                    "judge_model_name": judge_model_name,
-                }
-                individual_evaluations.append(evaluation_entry)
-
-                # 平均計算のためのスコア収集
-                for key in total_scores.keys():
-                    total_scores[key] += evaluation[key]
-
-            # ステップ8: 平均スコアの計算
-            average_scores = {
-                key: value / len(judge_models) for key, value in total_scores.items()
-            }
-            aggregated_evaluation = {
-                "Roleplay Adherence": average_scores["Roleplay Adherence"],
-                "Consistency": average_scores["Consistency"],
-                "Contextual Understanding": average_scores["Contextual Understanding"],
-                "Expressiveness": average_scores["Expressiveness"],
-                "Creativity": average_scores["Creativity"],
-                "Naturalness of Japanese": average_scores["Naturalness of Japanese"],
-                "Enjoyment of the Dialogue": average_scores["Enjoyment of the Dialogue"],
-                "Appropriateness of Turn-Taking": average_scores[
-                    "Appropriateness of Turn-Taking"
-                ],
-                "target_model_name": config["target_model_name"],
-                "user_model_name": config["user_model_name"],
-                "judge_model_names": [model[2] for model in judge_models],
-                "id": conversation_id,
-                "conversation_history": conversation_history,
-                "individual_evaluations": individual_evaluations,
-            }
-
-            all_evaluations.append(aggregated_evaluation)
-
-    logger.info("推論と評価が完了")
-    logger.info(f"推論成功件数: {len(all_conversations)}")
-    if not config.get("no_judge", False):
-        logger.info(f"評価成功件数: {len(all_evaluations)}")
-
-    # ステップ9: 最終結果の保存
-    conversations_output_file = f"./conversations/{config['target_model_name'].replace('/', '-')}_{config['dataset_repo'].replace('/', '-')}.jsonl"
-    with open(
-        conversations_output_file,
-        "w",
-        encoding="utf-8",
-    ) as f:
-        for conversation in all_conversations:
-            json.dump(conversation, f, ensure_ascii=False)
-            f.write("\n")
-            
-    if not config.get("no_judge", False):
-        evaluations_output_file = f"./evaluations/{config['target_model_name'].replace('/', '-')}_{config['dataset_repo'].replace('/', '-')}.jsonl"
-        with open(
-            evaluations_output_file,
-            "w",
-            encoding="utf-8",
-        ) as f:
-            for evaluation in all_evaluations:
-                json.dump(evaluation, f, ensure_ascii=False)
-                f.write("\n")
-    logger.info("全ての処理が完了")
-    logger.info(f"推論の結果は{conversations_output_file}に保存されました")
-    if not config.get("no_judge", False):
-        logger.info(f"評価の結果は{evaluations_output_file}に保存されました。")
-
-
-def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config", type=str, required=True, help="設定ファイルへのパス (YAML形式)"
-    )
-    parser.add_argument(
-        "--low-context", action="store_true", help="Use lower token limit (256 instead of 1024) for responses"
-    )
-    parser.add_argument(
-        "--ultra-low-context", action="store_true", help="Use ultra-low token limit (128 instead of 256/1024) for responses"
-    )
-    args = parser.parse_args()
-
-    # YAMLファイルから設定を読み込む
-    with open(args.config, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    
-    # Add context flags to config
-    config["low_context"] = args.low_context
-    config["ultra_low_context"] = args.ultra_low_context
-
-    os.makedirs("./conversations", exist_ok=True)
-    run_eval(config)
+            closed.add(id(client))
+            close = getattr(client, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:
+                    logger.warning("Failed to close inference client")
